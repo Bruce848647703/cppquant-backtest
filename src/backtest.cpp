@@ -20,6 +20,17 @@ Backtester::Backtester(BacktestConfig config) : config_(config) {
   if (!std::isfinite(config_.slippage_bps) || config_.slippage_bps < 0.0) {
     throw std::invalid_argument("slippage must be non-negative");
   }
+  if (!std::isfinite(config_.spread_bps) || config_.spread_bps < 0.0) {
+    throw std::invalid_argument("spread must be non-negative");
+  }
+  if (!std::isfinite(config_.impact_bps) || config_.impact_bps < 0.0) {
+    throw std::invalid_argument("impact must be non-negative");
+  }
+  if (!std::isfinite(config_.max_volume_participation) ||
+      config_.max_volume_participation <= 0.0 ||
+      config_.max_volume_participation > 1.0) {
+    throw std::invalid_argument("volume participation must be in (0, 1]");
+  }
   if (!std::isfinite(config_.periods_per_year) ||
       config_.periods_per_year <= 0.0) {
     throw std::invalid_argument("periods per year must be positive");
@@ -342,10 +353,28 @@ void Backtester::remove_pending(OrderId id) {
                  pending_.end());
 }
 
+double Backtester::effective_slippage_bps(const Bar& bar,
+                                          double quantity) const {
+  switch (config_.slippage_model) {
+  case SlippageModel::FixedBps:
+    return config_.slippage_bps;
+  case SlippageModel::Spread:
+    return 0.5 * config_.spread_bps;
+  case SlippageModel::Impact: {
+    const double participation =
+        bar.volume > 0.0 ? std::clamp(quantity / bar.volume, 0.0, 1.0) : 1.0;
+    return config_.slippage_bps + config_.impact_bps * std::sqrt(participation);
+  }
+  }
+  return config_.slippage_bps;
+}
+
 void Backtester::execute_pending(const Bar& bar) {
-  const double slippage = config_.slippage_bps / 10'000.0;
   std::vector<OrderId> still_pending;
   still_pending.reserve(pending_.size());
+
+  double bar_liquidity =
+      bar.volume > 0.0 ? bar.volume * config_.max_volume_participation : 0.0;
 
   for (const OrderId id : pending_) {
     auto iterator = orders_.find(id);
@@ -367,8 +396,19 @@ void Backtester::execute_pending(const Bar& bar) {
       still_pending.push_back(id);
       continue;
     }
+    if (triggered_now) {
+      order.triggered = true;
+    }
+
+    const double remaining = order.quantity - order.filled_quantity;
+    const double quantity = std::min(remaining, bar_liquidity);
+    if (quantity <= 1e-12) {
+      still_pending.push_back(id);
+      continue;
+    }
 
     if (order.type == OrderType::Market || order.type == OrderType::Stop) {
+      const double slippage = effective_slippage_bps(bar, quantity) / 10'000.0;
       price = order.side == Side::Buy ? price * (1.0 + slippage)
                                       : price * (1.0 - slippage);
       if (!std::isfinite(price) || price <= 0.0) {
@@ -376,8 +416,8 @@ void Backtester::execute_pending(const Bar& bar) {
       }
     }
 
-    const double quantity = order.quantity - order.filled_quantity;
     apply_fill(order, price, bar.timestamp, quantity);
+    bar_liquidity -= quantity;
     if (order.status == OrderStatus::Pending ||
         order.status == OrderStatus::PartiallyFilled) {
       still_pending.push_back(id);

@@ -17,6 +17,9 @@ No third-party dependencies.
   time-in-force and an explicit order state machine.
 - **Commission and slippage** in basis points; limit fills never trade worse
   than the limit price.
+- **Partial fills**: per-bar volume participation is shared across orders and
+  unfilled quantity stays pending across bars.
+- **Slippage models**: fixed bps, half-spread and square-root volume impact.
 - **Long and short** positions with average-cost accounting and realized PnL.
 - **Order queries**: `find_order`, `open_orders` and `cancel_order`.
 - **Target positions**: `order_target(x)` accounts for pending orders and does
@@ -199,11 +202,18 @@ excluded from the timing.
 ## Execution model
 
 - Orders are submitted from `Strategy::on_bar` and matched against the next
-  bar's OHLC. There is no partial fill, queue position or latency model in W1.
-- Market and stop fills pay `slippage_bps / 10,000` adverse to the trader.
-  Limit and stop-limit fills never trade worse than the limit price.
-- Commission is `notional * commission_bps / 10,000`, charged on both buys and
-  sells.
+  bar's OHLC.
+- A bar can fill at most `volume * max_volume_participation` across all
+  pending orders (default 10%). Unfilled quantity stays pending for GTC orders
+  or expires for DAY orders.
+- Market and stop fills pay the configured slippage; limit and stop-limit fills
+  never trade worse than the limit price. Market orders can therefore fill in
+  pieces across several bars.
+- Slippage models:
+  - `FixedBps` uses `slippage_bps`.
+  - `Spread` uses half of `spread_bps`.
+  - `Impact` uses `slippage_bps + impact_bps * sqrt(fill_qty / bar.volume)`.
+- Commission is `notional * commission_bps / 10,000`, charged on every fill.
 - DAY orders are valid for the next bar only; unfilled quantity expires at that
   bar's close. GTC orders remain until filled or cancelled.
 - Short selling is allowed and has no borrow cost or margin constraint; cash
@@ -212,6 +222,13 @@ excluded from the timing.
   close, not liquidated.
 - `timestamp` is used for reporting only. Annualization uses
   `periods_per_year` (default 252), not the timestamp deltas.
+
+```cpp
+BacktestConfig config;
+config.max_volume_participation = 0.10;
+config.slippage_model = SlippageModel::Impact;
+config.impact_bps = 20.0;
+```
 
 ## Design
 
@@ -240,7 +257,7 @@ and test strategy.
 ## Limitations
 
 - Single instrument and single strategy per run.
-- Bar data only: no ticks, order book, limit orders or partial fills.
+- Bar data only: no ticks, order book, queue position or latency model.
 - No margin, borrow fees, corporate actions or transaction taxes.
 - No walk-forward optimization or parameter sweeps; run the CLI per parameter
   set or drive `Backtester` from your own code.
@@ -251,11 +268,14 @@ with participation limits, and a walk-forward experiment driver.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 33 tests cover:
+The repository uses a small header-only test harness. The 42 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
 - DAY expiry, GTC persistence, cancellation and order-state queries;
+- volume participation, shared bar liquidity, partial fills across bars and
+  zero-volume bars;
+- fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover;

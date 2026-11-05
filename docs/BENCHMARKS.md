@@ -19,9 +19,16 @@ The run uses synthetic, deterministic data (seed 42); generation is excluded
 from the timing. Numbers are indicative; run the benchmark on your own
 hardware.
 
+## W2: partial fills
+
+The benchmark's 100-unit orders against roughly 1M volume stay below the
+default 10% participation cap, so the W1 backtest numbers remain comparable.
+The per-bar liquidity calculation adds a multiply, a minimum and a subtraction
+per order. A dedicated partial-fill throughput baseline will be added with the
+multi-symbol work.
+
 ## Planned baselines
 
-- W2: limit/stop order throughput and partial-fill overhead.
 - W3–W4: multi-symbol batch throughput and portfolio update cost.
 - W5–W6: walk-forward and parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.

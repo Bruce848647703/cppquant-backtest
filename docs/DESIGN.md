@@ -36,9 +36,28 @@ Pending -> PartiallyFilled -> Filled
    +-> Expired
 ```
 
-W1 fills the full remaining quantity; `PartiallyFilled` is already modelled for
-the volume-participation milestone. `find_order`, `open_orders` and
-`cancel_order` expose the state machine to strategies and tests.
+W1 fills in full; W2 adds volume participation and partial fills.
+`find_order`, `open_orders` and `cancel_order` expose the state machine to
+strategies and tests.
+
+### Bar liquidity and partial fills
+
+Each bar has a shared fill budget:
+
+```text
+bar_liquidity = max(bar.volume, 0) * max_volume_participation
+```
+
+Pending orders are processed in submission order. Each order fills at most
+`min(remaining, bar_liquidity)`, and the budget is reduced by the filled
+quantity, so multiple orders cannot consume more than the configured share of
+the bar. A zero-volume bar fills nothing.
+
+An order with a positive filled quantity but remaining quantity becomes
+`PartiallyFilled` and stays pending (unless its time-in-force expires). Its
+average fill price and commission are accumulated across fills. Market orders
+follow the same rule, so a large market order can execute over several bars;
+use DAY to cancel the remainder at the end of its valid bar.
 
 ### Fill rules
 
@@ -73,6 +92,18 @@ limit / stop-limit fill = open or limit price, never worse
 commission = fill_price * quantity * commission_bps / 10,000
 cash      -= signed_quantity * fill_price + commission
 ```
+
+Slippage has three models:
+
+| Model | Effective adverse move |
+| --- | --- |
+| `FixedBps` | `slippage_bps` |
+| `Spread` | `spread_bps / 2` |
+| `Impact` | `slippage_bps + impact_bps * sqrt(fill_qty / bar.volume)` |
+
+Limit and stop-limit orders never pay slippage beyond their limit price.
+Market and stop orders use the model above. Impact uses the quantity actually
+filled in the bar, not the original order size.
 
 `signed_quantity` is positive for buys and negative for sells. Commission is
 always subtracted, so both sides pay it. A fill is recorded with its timestamp,
@@ -210,6 +241,9 @@ which makes every fill and cash movement predictable. They verify:
 - next-open execution and the exact commission/slippage arithmetic;
 - limit, stop and stop-limit fills on gaps and intrabar touches;
 - DAY expiry, GTC persistence, cancellation and order-state queries;
+- volume participation, shared bar liquidity, partial fills and zero-volume
+  bars;
+- fixed, spread and impact slippage models;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against
@@ -225,8 +259,7 @@ benchmark runs in `--quick` mode as a smoke test.
 ## Possible extensions
 
 - A portfolio of instruments with per-symbol positions and marks.
-- Volume-participation and partial fills across bars.
-- Participation-rate fills from volume, queue position and latency.
+- Queue position, latency and tick-level fills.
 - Discrete dividends, splits and borrow costs.
 - Walk-forward parameter sweeps with out-of-sample reporting.
 - An equity-curve export (CSV/JSON) for plotting.

@@ -908,6 +908,337 @@ TEST(invalid_order_parameters_are_rejected) {
   CHECK_THROW(engine.buy_limit(std::nan(""), 100.0), std::invalid_argument);
 }
 
+TEST(partial_fills_respect_volume_participation) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(172'800, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(259'200, 100.0, 101.0, 99.0, 100.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy(25.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 3u);
+  CHECK_NEAR(engine.fills()[0].quantity, 10.0, 1e-12);
+  CHECK_NEAR(engine.fills()[1].quantity, 10.0, 1e-12);
+  CHECK_NEAR(engine.fills()[2].quantity, 5.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+  CHECK_NEAR(engine.find_order(id)->filled_quantity, 25.0, 1e-12);
+  CHECK_NEAR(engine.position(), 25.0, 1e-12);
+}
+
+TEST(zero_volume_bars_do_not_fill) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 0.0),
+      make_ohlc(172'800, 100.0, 101.0, 99.0, 100.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  ScriptedStrategy strategy(
+      [](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy(10.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_EQ(engine.fills()[0].timestamp, 172'800);
+  CHECK_NEAR(engine.fills()[0].quantity, 10.0, 1e-12);
+}
+
+TEST(bar_liquidity_is_shared_across_orders) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(172'800, 100.0, 101.0, 99.0, 100.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  OrderId first = 0;
+  OrderId second = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          first = backtester.buy(10.0);
+          second = backtester.buy(10.0);
+        }
+        if (index == 1) {
+          CHECK(backtester.find_order(first)->status == OrderStatus::Filled);
+          CHECK(backtester.find_order(second)->status == OrderStatus::Pending);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 2u);
+  CHECK(engine.find_order(first)->status == OrderStatus::Filled);
+  CHECK(engine.find_order(second)->status == OrderStatus::Filled);
+  CHECK_NEAR(engine.position(), 20.0, 1e-12);
+}
+
+TEST(day_partial_fills_expire_the_remainder) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy(20.0, TimeInForce::Day);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_NEAR(engine.fills()[0].quantity, 10.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Expired);
+  CHECK_NEAR(engine.find_order(id)->filled_quantity, 10.0, 1e-12);
+  CHECK_EQ(engine.pending_order_count(), 0u);
+}
+
+TEST(gtc_partial_fills_continue_and_average) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(172'800, 110.0, 111.0, 109.0, 110.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy(20.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 2u);
+  CHECK_NEAR(engine.fills()[0].price, 100.0, 1e-12);
+  CHECK_NEAR(engine.fills()[1].price, 110.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+  CHECK_NEAR(engine.find_order(id)->average_fill_price, 105.0, 1e-12);
+  CHECK_NEAR(engine.cash(), 7'900.0, 1e-12);
+}
+
+TEST(cancelling_a_partially_filled_order_stops_the_remainder) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(172'800, 100.0, 101.0, 99.0, 100.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy(20.0);
+        } else if (index == 1) {
+          CHECK(backtester.cancel_order(id));
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_NEAR(engine.fills()[0].quantity, 10.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Cancelled);
+  CHECK_NEAR(engine.position(), 10.0, 1e-12);
+  CHECK_EQ(engine.pending_order_count(), 0u);
+}
+
+TEST(slippage_model_fixed_spread_and_impact) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 1'000.0),
+  };
+
+  {
+    BacktestConfig config;
+    config.initial_cash = 10'000.0;
+    config.commission_bps = 0.0;
+    config.slippage_model = SlippageModel::FixedBps;
+    config.slippage_bps = 100.0;
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy(10.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 101.0, 1e-12);
+  }
+
+  {
+    BacktestConfig config;
+    config.initial_cash = 10'000.0;
+    config.commission_bps = 0.0;
+    config.slippage_model = SlippageModel::Spread;
+    config.spread_bps = 200.0;
+    config.slippage_bps = 999.0;
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy(10.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 101.0, 1e-12);
+  }
+
+  {
+    BacktestConfig config;
+    config.initial_cash = 10'000.0;
+    config.commission_bps = 0.0;
+    config.slippage_model = SlippageModel::Impact;
+    config.slippage_bps = 0.0;
+    config.impact_bps = 100.0;
+    config.max_volume_participation = 1.0;
+    Backtester engine(config);
+    const std::vector<Bar> impact_bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+    };
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy(25.0);
+          }
+        });
+    engine.run(impact_bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 100.5, 1e-12);
+  }
+
+  {
+    BacktestConfig config;
+    config.initial_cash = 10'000.0;
+    config.commission_bps = 0.0;
+    config.slippage_model = SlippageModel::Impact;
+    config.impact_bps = 10'000.0;
+    config.max_volume_participation = 1.0;
+    Backtester engine(config);
+    const std::vector<Bar> limit_bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 90.0, 92.0, 88.0, 91.0, 100.0),
+    };
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy_limit(10.0, 95.0);
+          }
+        });
+    engine.run(limit_bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 90.0, 1e-12);
+  }
+}
+
+TEST(partial_fill_commissions_are_charged_per_fill) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0, 100.0),
+      make_ohlc(172'800, 110.0, 111.0, 109.0, 110.0, 100.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 1.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 0.1;
+  Backtester engine(config);
+
+  ScriptedStrategy strategy(
+      [](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy(20.0);
+        }
+      });
+
+  const Performance performance = engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 2u);
+  CHECK_NEAR(engine.fills()[0].commission, 0.10, 1e-12);
+  CHECK_NEAR(engine.fills()[1].commission, 0.11, 1e-12);
+  CHECK_NEAR(performance.total_commission, 0.21, 1e-12);
+  CHECK_NEAR(engine.cash(), 10'000.0 - 1'000.10 - 1'100.11, 1e-9);
+}
+
+TEST(volume_participation_and_slippage_settings_are_validated) {
+  BacktestConfig config;
+  config.max_volume_participation = 0.0;
+  CHECK_THROW(Backtester{config}, std::invalid_argument);
+
+  config.max_volume_participation = 1.5;
+  CHECK_THROW(Backtester{config}, std::invalid_argument);
+
+  config.max_volume_participation = 1.0;
+  config.spread_bps = -1.0;
+  CHECK_THROW(Backtester{config}, std::invalid_argument);
+
+  config.spread_bps = 0.0;
+  config.impact_bps = -1.0;
+  CHECK_THROW(Backtester{config}, std::invalid_argument);
+
+  config.impact_bps = 0.0;
+  Backtester valid(config);
+  (void)valid;
+}
+
 TEST(invalid_inputs_are_rejected) {
   BacktestConfig config;
   config.initial_cash = 0.0;

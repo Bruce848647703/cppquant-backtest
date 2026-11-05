@@ -44,6 +44,24 @@ enum class OrderStatus : std::uint8_t {
   Expired,
 };
 
+enum class SlippageModel : std::uint8_t {
+  FixedBps,
+  Spread,
+  Impact,
+};
+
+inline const char* to_string(SlippageModel model) noexcept {
+  switch (model) {
+  case SlippageModel::FixedBps:
+    return "fixed-bps";
+  case SlippageModel::Spread:
+    return "spread";
+  case SlippageModel::Impact:
+    return "impact";
+  }
+  return "unknown";
+}
+
 struct OrderState {
   OrderId id{};
   Side side{Side::Buy};
@@ -73,9 +91,17 @@ struct BacktestConfig {
   double initial_cash{100'000.0};
   /// Commission in basis points of notional, charged on both sides.
   double commission_bps{1.0};
-  /// Adverse price movement in basis points applied to market and stop fills.
-  /// Limit and stop-limit fills never trade worse than their limit price.
+  /// Base adverse price movement in basis points applied to market and stop
+  /// fills. Limit and stop-limit fills never trade worse than their limit.
   double slippage_bps{1.0};
+  SlippageModel slippage_model{SlippageModel::FixedBps};
+  /// Full spread in basis points; the Spread model applies half of it.
+  double spread_bps{0.0};
+  /// Impact coefficient in basis points at 100% of bar volume. The Impact
+  /// model uses base slippage plus impact_bps * sqrt(participation).
+  double impact_bps{0.0};
+  /// Maximum fraction of a bar's volume that can fill across all orders.
+  double max_volume_participation{0.1};
   /// Number of bars per year used for Sharpe and annualized returns.
   double periods_per_year{252.0};
   /// Annual risk-free rate used for the Sharpe ratio.
@@ -207,6 +233,7 @@ private:
                 bool& triggered_now) const;
   void apply_fill(OrderState& order, double price, std::int64_t timestamp,
                   double quantity);
+  double effective_slippage_bps(const Bar& bar, double quantity) const;
   void expire_day_orders();
   void remove_pending(OrderId id);
   void reset();

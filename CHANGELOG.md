@@ -15,6 +15,13 @@ All notable changes to this project are documented here.
   bar, while a gap through the stop activates the limit immediately.
 - Tests for limit/stop fills, gaps, expiry, cancellation, state queries and
   invalid orders.
+- Volume participation caps shared across all orders in a bar; zero-volume bars
+  never fill.
+- Partial fills across bars with `PartiallyFilled` order state, average fill
+  price and per-fill commissions.
+- Fixed-bps, half-spread and square-root impact slippage models.
+- Tests for participation, aggregate liquidity, day expiry after partial
+  fills, partial cancellation and slippage models.
 
 ### Planned
 
