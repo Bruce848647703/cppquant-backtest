@@ -226,6 +226,13 @@ The repository uses a small header-only test harness. The 15 tests cover:
 ./build/backtest_tests csv        # filter by substring
 ```
 
+## Roadmap
+
+The 8-week plan (2026-11-09 to 2027-01-03), milestones and acceptance criteria
+live in [docs/ROADMAP.md](docs/ROADMAP.md). Current and historical numbers are
+in [docs/BENCHMARKS.md](docs/BENCHMARKS.md); user-visible changes are tracked in
+[CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
