@@ -11,10 +11,14 @@ No third-party dependencies.
 
 ## Features
 
-- **Event-driven loop**: orders submitted on bar `t` execute at bar `t+1`'s
-  open, so strategies cannot look ahead.
-- **Commission and slippage** in basis points, applied to both sides.
+- **Event-driven loop**: orders submitted on bar `t` become eligible on bar
+  `t+1`, so strategies cannot look ahead.
+- **Order types**: market, limit, stop and stop-limit, with DAY and GTC
+  time-in-force and an explicit order state machine.
+- **Commission and slippage** in basis points; limit fills never trade worse
+  than the limit price.
 - **Long and short** positions with average-cost accounting and realized PnL.
+- **Order queries**: `find_order`, `open_orders` and `cancel_order`.
 - **Target positions**: `order_target(x)` accounts for pending orders and does
   not stack duplicate fills.
 - **Metrics**: total and annualized return, annualized volatility, Sharpe
@@ -90,6 +94,40 @@ Orders placed in `on_bar` are queued and filled at the **next** bar's open. The
 last bar can leave pending orders; they are dropped because there is no next
 open. `close_position()` is shorthand for `order_target(0)`.
 
+### Order types
+
+```cpp
+engine.buy(100.0);                                  // market
+engine.buy_limit(100.0, 95.0);                      // buy limit
+engine.sell_stop(100.0, 90.0);                       // sell stop
+engine.buy_stop_limit(100.0, 105.0, 106.0);          // buy stop-limit
+engine.buy_limit(100.0, 95.0, TimeInForce::Day);     // expires after next bar
+
+OrderId id = engine.buy_limit(100.0, 95.0);
+if (const OrderState* order = engine.find_order(id)) {
+  // order->status, order->filled_quantity, order->average_fill_price ...
+}
+engine.cancel_order(id);
+```
+
+Fill rules use the next bar's OHLC:
+
+| Order | Buy | Sell |
+| --- | --- | --- |
+| Market | next open | next open |
+| Limit | `open <= limit`, else `low <= limit` | `open >= limit`, else `high >= limit` |
+| Stop | `open >= stop`, else `high >= stop` | `open <= stop`, else `low <= stop` |
+| Stop-limit | trigger as a stop, then behave as a limit | trigger as a stop, then behave as a limit |
+
+Limit fills use the open when it is better than the limit, otherwise the limit
+price. A stop-limit that is triggered only inside a bar waits for the next bar:
+OHLC data cannot reveal whether the limit was reached before or after the stop.
+A gap through the stop activates the limit immediately.
+
+`OrderStatus` is one of `Pending`, `PartiallyFilled`, `Filled`, `Cancelled` or
+`Expired`. W1 fills orders in full; partial fills arrive with the volume
+participation work in W2.
+
 ## Command-line backtest
 
 ```bash
@@ -160,12 +198,14 @@ excluded from the timing.
 
 ## Execution model
 
-- Market orders only; there is no partial fill, queue position or latency
-  model.
-- Fill price is the next open, moved against the trader by
-  `slippage_bps / 10,000`.
+- Orders are submitted from `Strategy::on_bar` and matched against the next
+  bar's OHLC. There is no partial fill, queue position or latency model in W1.
+- Market and stop fills pay `slippage_bps / 10,000` adverse to the trader.
+  Limit and stop-limit fills never trade worse than the limit price.
 - Commission is `notional * commission_bps / 10,000`, charged on both buys and
   sells.
+- DAY orders are valid for the next bar only; unfilled quantity expires at that
+  bar's close. GTC orders remain until filled or cancelled.
 - Short selling is allowed and has no borrow cost or margin constraint; cash
   can go negative.
 - Equity is `cash + position * close`. The final position is marked at the last
@@ -211,15 +251,17 @@ with participation limits, and a walk-forward experiment driver.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 15 tests cover:
+The repository uses a small header-only test harness. The 33 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
+- market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
+- DAY expiry, GTC persistence, cancellation and order-state queries;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover;
 - SMA crossover trading and short mode;
 - CSV parsing, header handling and malformed input;
-- invalid configuration and reset between runs.
+- invalid configuration, invalid orders and reset between runs.
 
 ```bash
 ./build/backtest_tests            # all tests

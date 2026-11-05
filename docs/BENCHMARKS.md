@@ -21,7 +21,7 @@ hardware.
 
 ## Planned baselines
 
-- W1–W2: limit/stop order throughput and partial-fill overhead.
+- W2: limit/stop order throughput and partial-fill overhead.
 - W3–W4: multi-symbol batch throughput and portfolio update cost.
 - W5–W6: walk-forward and parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.

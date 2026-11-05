@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace cppquant {
@@ -21,8 +22,46 @@ struct Bar {
 
 enum class Side : std::uint8_t { Buy, Sell };
 
+using OrderId = std::uint64_t;
+
+enum class OrderType : std::uint8_t {
+  Market,
+  Limit,
+  Stop,
+  StopLimit,
+};
+
+enum class TimeInForce : std::uint8_t {
+  GoodTilCancelled,
+  Day,
+};
+
+enum class OrderStatus : std::uint8_t {
+  Pending,
+  PartiallyFilled,
+  Filled,
+  Cancelled,
+  Expired,
+};
+
+struct OrderState {
+  OrderId id{};
+  Side side{Side::Buy};
+  OrderType type{OrderType::Market};
+  TimeInForce time_in_force{TimeInForce::GoodTilCancelled};
+  double quantity{};
+  double filled_quantity{};
+  double limit_price{};
+  double stop_price{};
+  double average_fill_price{};
+  OrderStatus status{OrderStatus::Pending};
+  bool triggered{false};
+  std::int64_t submitted_bar{-1};
+  std::int64_t expires_after_bar{-1};
+};
+
 struct Fill {
-  std::uint64_t order_id{};
+  OrderId order_id{};
   std::int64_t timestamp{};
   Side side{Side::Buy};
   double price{};
@@ -34,7 +73,8 @@ struct BacktestConfig {
   double initial_cash{100'000.0};
   /// Commission in basis points of notional, charged on both sides.
   double commission_bps{1.0};
-  /// Adverse price movement in basis points, applied to the open price.
+  /// Adverse price movement in basis points applied to market and stop fills.
+  /// Limit and stop-limit fills never trade worse than their limit price.
   double slippage_bps{1.0};
   /// Number of bars per year used for Sharpe and annualized returns.
   double periods_per_year{252.0};
@@ -63,9 +103,10 @@ struct Performance {
 
 class Backtester;
 
-/// Strategy callback. `on_bar` is invoked after the bar's open has been used
-/// to execute orders submitted on the previous bar. Orders submitted here
-/// execute at the next bar's open, which prevents look-ahead bias.
+/// Strategy callback. `on_bar` is invoked after the current bar's open/high/
+/// low have been used to execute orders submitted on the previous bar. Orders
+/// submitted here become eligible on the next bar, which prevents look-ahead
+/// bias.
 class Strategy {
 public:
   virtual ~Strategy() = default;
@@ -74,10 +115,10 @@ public:
 
 /// Single-instrument event-driven backtester.
 ///
-/// Orders are market orders submitted from a strategy and executed at the next
-/// bar's open with the configured slippage and commission. The engine supports
-/// long and short positions but does not simulate margin calls or borrow
-/// costs.
+/// Market, limit, stop and stop-limit orders are submitted from a strategy and
+/// matched against the next bar's OHLC. The engine supports long and short
+/// positions, day orders and good-til-cancelled orders, but does not simulate
+/// margin calls or borrow costs.
 class Backtester {
 public:
   explicit Backtester(BacktestConfig config = {});
@@ -86,9 +127,37 @@ public:
   /// run again resets all state.
   Performance run(const std::vector<Bar>& bars, Strategy& strategy);
 
-  /// Order entry, callable from Strategy::on_bar.
-  void buy(double quantity);
-  void sell(double quantity);
+  /// Market order entry, callable from Strategy::on_bar.
+  OrderId buy(double quantity, TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell(double quantity,
+               TimeInForce tif = TimeInForce::GoodTilCancelled);
+
+  OrderId buy_limit(double quantity, double limit_price,
+                    TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_limit(double quantity, double limit_price,
+                     TimeInForce tif = TimeInForce::GoodTilCancelled);
+
+  OrderId buy_stop(double quantity, double stop_price,
+                   TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_stop(double quantity, double stop_price,
+                    TimeInForce tif = TimeInForce::GoodTilCancelled);
+
+  OrderId buy_stop_limit(double quantity, double stop_price, double limit_price,
+                         TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_stop_limit(double quantity, double stop_price,
+                          double limit_price,
+                          TimeInForce tif = TimeInForce::GoodTilCancelled);
+
+  /// Cancel a pending order. Returns false for unknown or terminal orders.
+  bool cancel_order(OrderId id);
+
+  /// Look up an order, including filled, cancelled and expired orders. The
+  /// returned pointer is valid until the next `run()`.
+  const OrderState* find_order(OrderId id) const noexcept;
+
+  /// Copy of all orders that are still pending or partially filled.
+  std::vector<OrderState> open_orders() const;
+
   /// Move to `target_position` (positive long, negative short) using the
   /// current position plus pending orders as the starting point.
   void order_target(double target_position);
@@ -131,15 +200,15 @@ public:
   }
 
 private:
-  struct PendingOrder {
-    std::uint64_t id{};
-    Side side{Side::Buy};
-    double quantity{};
-  };
-
-  void execute_pending(double open_price, std::int64_t timestamp);
-  void apply_fill(const PendingOrder& order, double price,
-                  std::int64_t timestamp);
+  OrderId submit_order(OrderType type, Side side, double quantity,
+                       double limit_price, double stop_price, TimeInForce tif);
+  void execute_pending(const Bar& bar);
+  bool try_fill(OrderState& order, const Bar& bar, double& price,
+                bool& triggered_now) const;
+  void apply_fill(OrderState& order, double price, std::int64_t timestamp,
+                  double quantity);
+  void expire_day_orders();
+  void remove_pending(OrderId id);
   void reset();
 
   BacktestConfig config_;
@@ -149,11 +218,13 @@ private:
   double realized_pnl_{};
   double total_commission_{};
   double total_notional_{};
-  std::uint64_t next_order_id_{1};
+  OrderId next_order_id_{1};
   std::size_t winning_closes_{};
   std::size_t losing_closes_{};
+  std::int64_t current_bar_{-1};
 
-  std::vector<PendingOrder> pending_;
+  std::unordered_map<OrderId, OrderState> orders_;
+  std::vector<OrderId> pending_;
   std::vector<Fill> fills_;
   std::vector<double> equity_curve_;
   std::vector<std::int64_t> equity_timestamps_;

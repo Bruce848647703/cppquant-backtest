@@ -24,6 +24,11 @@ Bar make_bar(std::int64_t timestamp, double open, double close,
              volume};
 }
 
+Bar make_ohlc(std::int64_t timestamp, double open, double high, double low,
+              double close, double volume = 1'000'000.0) {
+  return Bar{timestamp, open, high, low, close, volume};
+}
+
 class ScriptedStrategy : public Strategy {
 public:
   using Action = std::function<void(const Bar&, Backtester&, std::size_t)>;
@@ -391,6 +396,516 @@ TEST(csv_loader_rejects_malformed_rows) {
   std::remove(bad_path.string().c_str());
 
   CHECK_THROW(load_bars_csv("/definitely/not/a/file.csv"), std::runtime_error);
+}
+
+TEST(limit_buy_fills_at_the_open_on_a_gap) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 90.0, 92.0, 88.0, 91.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  const OrderState* order = engine.find_order(id);
+  CHECK(order != nullptr);
+  CHECK(order->status == OrderStatus::Filled);
+  CHECK_NEAR(order->filled_quantity, 10.0, 1e-12);
+  CHECK_NEAR(order->average_fill_price, 90.0, 1e-12);
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_NEAR(engine.fills()[0].price, 90.0, 1e-12);
+}
+
+TEST(limit_buy_fills_at_the_limit_when_touched) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 94.0, 99.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_NEAR(engine.fills()[0].price, 95.0, 1e-12);
+  CHECK_NEAR(engine.find_order(id)->average_fill_price, 95.0, 1e-12);
+}
+
+TEST(limit_buy_waits_until_the_limit_is_touched) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 99.0, 100.0, 96.0, 98.0),
+      make_ohlc(172'800, 99.0, 100.0, 94.0, 97.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_EQ(engine.fills()[0].timestamp, 172'800);
+  CHECK_NEAR(engine.fills()[0].price, 95.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+}
+
+TEST(sell_limit_fills_at_the_better_open_or_the_limit) {
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 110.0, 111.0, 108.0, 109.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.sell_limit(5.0, 105.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 110.0, 1e-12);
+  }
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 100.0, 106.0, 99.0, 105.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.sell_limit(5.0, 105.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 105.0, 1e-12);
+  }
+}
+
+TEST(stop_buy_triggers_at_the_open_on_a_gap) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 108.0, 110.0, 107.0, 109.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_stop(10.0, 105.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_NEAR(engine.fills()[0].price, 108.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+}
+
+TEST(stop_buy_triggers_intrabar_at_the_stop) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 106.0, 99.0, 105.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  ScriptedStrategy strategy(
+      [](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy_stop(10.0, 105.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_NEAR(engine.fills()[0].price, 105.0, 1e-12);
+}
+
+TEST(sell_stop_triggers_at_the_open_or_intrabar) {
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 90.0, 92.0, 88.0, 91.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.sell_stop(5.0, 95.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 90.0, 1e-12);
+  }
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 100.0, 101.0, 94.0, 96.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.sell_stop(5.0, 95.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 95.0, 1e-12);
+  }
+}
+
+TEST(stop_orders_pay_slippage_but_limits_do_not) {
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 100.0; // 1%
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 100.0, 106.0, 99.0, 105.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy_stop(5.0, 105.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 105.0 * 1.01, 1e-12);
+  }
+
+  {
+    const std::vector<Bar> bars = {
+        make_bar(0, 100.0, 100.0),
+        make_ohlc(86'400, 90.0, 92.0, 88.0, 91.0),
+    };
+    Backtester engine(config);
+    ScriptedStrategy strategy(
+        [](const Bar&, Backtester& backtester, std::size_t index) {
+          if (index == 0) {
+            backtester.buy_limit(5.0, 95.0);
+          }
+        });
+    engine.run(bars, strategy);
+    CHECK_NEAR(engine.fills()[0].price, 90.0, 1e-12);
+  }
+}
+
+TEST(stop_limit_gap_through_stop_fills_at_the_open) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 108.0, 112.0, 107.0, 110.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_stop_limit(10.0, 105.0, 110.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_NEAR(engine.fills()[0].price, 108.0, 1e-12);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+}
+
+TEST(stop_limit_intrabar_trigger_waits_for_the_next_bar) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 108.0, 99.0, 107.0),
+      make_ohlc(172'800, 104.0, 105.0, 102.0, 103.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_stop_limit(10.0, 105.0, 106.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  const OrderState* order = engine.find_order(id);
+  CHECK(order != nullptr);
+  CHECK(order->triggered);
+  CHECK(order->status == OrderStatus::Filled);
+  CHECK_NEAR(order->average_fill_price, 104.0, 1e-12);
+  CHECK_EQ(engine.fills().size(), 1u);
+}
+
+TEST(stop_limit_gap_outside_the_limit_becomes_a_limit_order) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 108.0, 110.0, 107.0, 109.0),
+      make_ohlc(172'800, 103.0, 104.0, 102.0, 103.5),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  ScriptedStrategy strategy(
+      [](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy_stop_limit(10.0, 105.0, 104.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_NEAR(engine.fills()[0].price, 103.0, 1e-12);
+}
+
+TEST(day_orders_expire_after_their_valid_bar) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 99.0, 100.0, 96.0, 98.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0, TimeInForce::Day);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK(engine.fills().empty());
+  CHECK_EQ(engine.pending_order_count(), 0u);
+  CHECK(engine.find_order(id)->status == OrderStatus::Expired);
+}
+
+TEST(day_orders_fill_on_their_valid_bar) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 99.0, 100.0, 94.0, 96.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0, TimeInForce::Day);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+}
+
+TEST(gtc_orders_survive_until_touched_or_cancelled) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 99.0, 100.0, 96.0, 98.0),
+      make_ohlc(172'800, 98.0, 99.0, 94.0, 96.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.fills().size(), 1u);
+  CHECK_EQ(engine.fills()[0].timestamp, 172'800);
+  CHECK(engine.find_order(id)->status == OrderStatus::Filled);
+}
+
+TEST(cancelling_an_order_prevents_execution) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 90.0, 92.0, 88.0, 91.0),
+  };
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  Backtester engine(config);
+
+  OrderId id = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          id = backtester.buy_limit(10.0, 95.0);
+          CHECK(backtester.cancel_order(id));
+          CHECK(!backtester.cancel_order(id));
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK(engine.fills().empty());
+  CHECK_EQ(engine.pending_order_count(), 0u);
+  CHECK(engine.find_order(id)->status == OrderStatus::Cancelled);
+}
+
+TEST(order_state_and_ids_are_queryable) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0),
+  };
+
+  Backtester engine;
+  OrderId first = 0;
+  OrderId second = 0;
+  ScriptedStrategy strategy(
+      [&](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          first = backtester.buy_limit(10.0, 95.0);
+          second = backtester.buy_stop(5.0, 105.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK(first != 0);
+  CHECK(second > first);
+  CHECK(engine.find_order(first) != nullptr);
+  CHECK(engine.find_order(second) != nullptr);
+  CHECK_EQ(engine.find_order(first)->type, OrderType::Limit);
+  CHECK_EQ(engine.find_order(second)->type, OrderType::Stop);
+  CHECK_EQ(engine.open_orders().size(), 2u);
+}
+
+TEST(order_target_accounts_for_pending_limit_orders) {
+  const std::vector<Bar> bars = {
+      make_bar(0, 100.0, 100.0),
+      make_ohlc(86'400, 100.0, 101.0, 99.0, 100.0),
+  };
+
+  Backtester engine;
+  ScriptedStrategy strategy(
+      [](const Bar&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy_limit(10.0, 90.0);
+          backtester.order_target(10.0);
+        }
+      });
+
+  engine.run(bars, strategy);
+
+  CHECK_EQ(engine.pending_order_count(), 1u);
+  CHECK_EQ(engine.fills().size(), 0u);
+  CHECK_NEAR(engine.position(), 0.0, 1e-12);
+}
+
+TEST(invalid_order_parameters_are_rejected) {
+  Backtester engine;
+
+  CHECK_THROW(engine.buy_limit(1.0, 0.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_limit(1.0, -5.0), std::invalid_argument);
+  CHECK_THROW(engine.sell_limit(1.0, 0.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_stop(1.0, 0.0), std::invalid_argument);
+  CHECK_THROW(engine.sell_stop(1.0, -5.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_stop_limit(1.0, 0.0, 100.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_stop_limit(1.0, 100.0, 0.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_limit(0.0, 100.0), std::invalid_argument);
+  CHECK_THROW(engine.buy_limit(std::nan(""), 100.0), std::invalid_argument);
 }
 
 TEST(invalid_inputs_are_rejected) {

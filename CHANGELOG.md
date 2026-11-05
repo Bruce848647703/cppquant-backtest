@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Limit, stop and stop-limit orders with next-bar OHLC fill rules and gap
+  handling.
+- Order state machine (`Pending`, `PartiallyFilled`, `Filled`, `Cancelled`,
+  `Expired`) with `find_order`, `open_orders` and `cancel_order`.
+- DAY and GTC time-in-force; DAY orders expire after their valid bar.
+- Conservative stop-limit semantics: an intrabar trigger waits for the next
+  bar, while a gap through the stop activates the limit immediately.
+- Tests for limit/stop fills, gaps, expiry, cancellation, state queries and
+  invalid orders.
+
 ### Planned
 
 - **0.2** — limit/stop orders, partial fills, volume participation.

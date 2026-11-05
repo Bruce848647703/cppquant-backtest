@@ -12,26 +12,64 @@ multi-asset portfolio, no parameter optimization.
 ```text
 reset state
 for i in 0 .. bars.size()-1:
+    current_bar = i
     if i > 0:
-        execute orders queued on bar i-1 at bars[i].open
+        execute pending orders against bars[i] OHLC
     strategy.on_bar(bars[i], engine)
+    expire DAY orders whose valid bar has passed
     equity_curve[i] = cash + position * bars[i].close
 ```
 
-The strategy only sees the completed bar. Any order it submits is queued and
-executed at the next bar's open, which is the simplest way to avoid look-ahead
-bias with OHLC data. Orders left pending after the last bar never execute.
+The strategy only sees the completed bar. Any order it submits becomes eligible
+on the next bar, which avoids look-ahead bias with OHLC data. Orders left
+pending after the last bar never execute.
 
 ## Orders and fills
 
-Only market orders exist. `buy`, `sell`, `order_target` and `close_position`
-append to a pending vector with a monotonically increasing id.
-
-At execution:
+The engine supports market, limit, stop and stop-limit orders, with DAY or GTC
+time-in-force. Every order has a monotonically increasing id and a state:
 
 ```text
-fill_price = open * (1 + slippage)      for buys
-fill_price = open * (1 - slippage)      for sells
+Pending -> PartiallyFilled -> Filled
+   |              |
+   +-> Cancelled  +-> Expired
+   +-> Expired
+```
+
+W1 fills the full remaining quantity; `PartiallyFilled` is already modelled for
+the volume-participation milestone. `find_order`, `open_orders` and
+`cancel_order` expose the state machine to strategies and tests.
+
+### Fill rules
+
+All orders are evaluated against the next bar's OHLC:
+
+| Order | Buy | Sell |
+| --- | --- | --- |
+| Market | `open` | `open` |
+| Limit | `open <= limit`, else `low <= limit` | `open >= limit`, else `high >= limit` |
+| Stop | `open >= stop`, else `high >= stop` | `open <= stop`, else `low <= stop` |
+| Stop-limit | trigger as a stop, then behave as a limit | trigger as a stop, then behave as a limit |
+
+Limit fills use the open when it is better than the limit; otherwise they use
+the limit price. This models price improvement on gaps without assuming
+favourable intrabar paths.
+
+Stop-limit orders have two cases:
+
+- A gap through the stop activates the limit at the open. If the open also
+  satisfies the limit, the order fills immediately at the open.
+- A trigger that only occurs inside the bar is **not** filled in the same bar.
+  OHLC data cannot reveal whether the limit was reached before or after the
+  stop, so the order becomes an active limit for the next bar. This is the
+  conservative assumption.
+
+### Slippage and commission
+
+```text
+market / stop fill = trigger * (1 + slippage)   for buys
+                     trigger * (1 - slippage)   for sells
+limit / stop-limit fill = open or limit price, never worse
 commission = fill_price * quantity * commission_bps / 10,000
 cash      -= signed_quantity * fill_price + commission
 ```
@@ -40,10 +78,17 @@ cash      -= signed_quantity * fill_price + commission
 always subtracted, so both sides pay it. A fill is recorded with its timestamp,
 side, price, quantity, commission and order id.
 
+### Time in force
+
+- GTC remains pending until filled or cancelled.
+- DAY is valid only for the next bar. If it is still pending at that bar's
+  close, the remaining quantity expires. A DAY order submitted on the final bar
+  has no valid bar and stays pending; callers should cancel it explicitly if
+  that matters.
+
 `order_target(target)` subtracts the current position **and any pending signed
-quantity** from the target before submitting. Calling it every bar is
-therefore idempotent once the target is reached; it does not stack duplicate
-orders.
+quantity** from the target before submitting. Calling it every bar is therefore
+idempotent once the target is reached; it does not stack duplicate orders.
 
 ## Position accounting
 
@@ -163,6 +208,8 @@ The tests use scripted strategies whose actions depend only on the bar index,
 which makes every fill and cash movement predictable. They verify:
 
 - next-open execution and the exact commission/slippage arithmetic;
+- limit, stop and stop-limit fills on gaps and intrabar touches;
+- DAY expiry, GTC persistence, cancellation and order-state queries;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against
@@ -178,7 +225,7 @@ benchmark runs in `--quick` mode as a smoke test.
 ## Possible extensions
 
 - A portfolio of instruments with per-symbol positions and marks.
-- Limit and stop orders with a simple fill model.
+- Volume-participation and partial fills across bars.
 - Participation-rate fills from volume, queue position and latency.
 - Discrete dividends, splits and borrow costs.
 - Walk-forward parameter sweeps with out-of-sample reporting.
