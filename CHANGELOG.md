@@ -33,6 +33,11 @@ All notable changes to this project are documented here.
   last-mark fallback to average cost.
 - Multi-asset tests for shared cash, target weights, missing marks and
   per-symbol close.
+- Rolling walk-forward runner with non-overlapping train/test windows,
+  in-sample SMA parameter selection and compounded OOS equity.
+- Per-window metrics, aggregate OOS statistics, CSV export and CLI.
+- Walk-forward tests for ordering, no overlap, selection, short windows,
+  reproducibility and export.
 
 ### Planned
 

@@ -196,6 +196,28 @@ increments `losing_trades`. A single round trip can therefore produce more than
 one "trade" in the win-rate statistic if it is closed in pieces. The `trades`
 field counts fills, not round trips.
 
+## Walk-forward
+
+`run_walk_forward` rolls a training window of `train_bars` and a test window of
+`test_bars`. The default step is the test length, so test segments never
+overlap; a smaller step is rejected.
+
+For every window:
+
+1. slice `[train_start, train_end)` and `[test_start, test_end)`;
+2. backtest every `(fast, slow)` SMA pair on the training slice;
+3. select the best training total return (or Sharpe);
+4. run the selected pair on the test slice with fresh state;
+5. append the test equity curve and compound the cash.
+
+The test slice is never used for selection. Positions are flat at each window
+boundary, but cash carries forward, so the OOS curve compounds. The CSV export
+contains one row per window with the ranges, parameters, training/test returns
+and test fill count.
+
+`WalkForwardResult` computes aggregate OOS return, volatility, Sharpe and
+drawdown from the stitched equity curve.
+
 ## Performance metrics
 
 Let `E_0 ... E_n` be the equity curve and `T` the number of return periods
@@ -289,6 +311,8 @@ which makes every fill and cash movement predictable. They verify:
 - fixed, spread and impact slippage models;
 - multi-symbol union alignment, missing counts, long-format loading, batch
   execution and the single-symbol adapter;
+- walk-forward window ordering, no-overlap validation, parameter selection,
+  short final windows, compounding, reproducibility and CSV export;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against

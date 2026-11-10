@@ -44,8 +44,15 @@ bars/s. Multi-asset batches add one hash lookup per pending order and a
 per-symbol mark update per batch. A dedicated portfolio benchmark will be
 added with the walk-forward/parallel sweep work.
 
+## W5: walk-forward
+
+Walk-forward cost is the number of windows times the grid size times the
+training backtest, plus one test backtest per window. The sample run (300 bars,
+100-bar train, 50-bar test, 4 parameter pairs) completes in well under a
+second. A dedicated grid-size/window-count benchmark will be added with the
+parallel sweep work.
+
 ## Planned baselines
 
-- W5–W6: walk-forward and parallel sweep wall time versus serial.
-- W5–W6: walk-forward and parallel sweep wall time versus serial.
+- W6: parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.

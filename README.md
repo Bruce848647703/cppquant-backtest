@@ -32,6 +32,8 @@ No third-party dependencies.
   a batch strategy API and a long-format CSV loader.
 - **Multi-asset portfolio**: per-symbol positions, average cost, realized PnL,
   shared cash, target quantities and portfolio equity.
+- **Walk-forward evaluation**: rolling train/test windows, in-sample parameter
+  selection, stitched out-of-sample equity and CSV export.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
   buy-and-hold.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
@@ -185,6 +187,26 @@ trades: 2
 ./build/panel_backtest data/sample_multi.csv 10
 ```
 
+## Walk-forward
+
+```bash
+./build/walk_forward_cli --csv data/sample_bars.csv \
+  --train 100 --test 50 --fast 5,10 --slow 20,30 \
+  --export walk_forward.csv
+```
+
+For each window, every `(fast, slow)` pair is trained on the training slice;
+the best training total return (or Sharpe) is selected and applied only to the
+following test slice. Test windows do not overlap by default, and cash
+compounds across windows while positions start flat each time.
+
+The stitched OOS curve is reported with total/annualized return, volatility,
+Sharpe, drawdown and total fills. Per-window parameters and metrics are
+available in `WalkForwardResult` and the CSV export.
+
+See [docs/WALK_FORWARD.md](docs/WALK_FORWARD.md) for the window layout, no-leak
+rules and CSV columns.
+
 ## Command-line backtest
 
 ```bash
@@ -291,9 +313,11 @@ include/cppquant/backtest.hpp   public API
 src/backtest.cpp                engine, accounting, metrics, strategies
 src/csv.cpp                     single and long-format CSV loaders
 src/panel.cpp                   multi-symbol alignment and batch loop
+src/walk_forward.cpp            rolling parameter selection and OOS stitching
 src/validate.hpp                shared OHLC validation
 examples/backtest_cli.cpp       single-symbol CLI
 examples/panel_backtest.cpp     multi-symbol CLI
+examples/walk_forward_cli.cpp   walk-forward CLI
 ```
 
 At each bar the engine:
@@ -315,8 +339,9 @@ and test strategy.
 - Bar data only: no ticks, order book, queue position or latency model.
 - No short-borrow costs, margin calls or per-symbol risk limits yet.
 - No margin, borrow fees, corporate actions or transaction taxes.
-- No walk-forward optimization or parameter sweeps; run the CLI per parameter
-  set or drive `Backtester` from your own code.
+- Walk-forward supports only the built-in SMA grid; a generic strategy factory
+  is not implemented.
+- No purged/embargoed gap between training and test windows.
 - Metrics assume bars are evenly spaced and match `periods_per_year`.
 
 Natural extensions are walk-forward evaluation, a multi-asset risk model and a
@@ -335,6 +360,8 @@ The repository uses a small header-only test harness. The 51 tests cover:
   batch execution and the single-symbol adapter;
 - multi-asset positions, shared cash, per-symbol realized PnL, target weights,
   last-mark equity and per-symbol close;
+- walk-forward window ordering, best-parameter selection, short final windows,
+  compounding, reproducibility and CSV export;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;
