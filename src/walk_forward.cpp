@@ -89,31 +89,6 @@ void compute_aggregate(WalkForwardResult& result,
 
 } // namespace
 
-std::vector<SmaParameters> make_sma_grid(const std::vector<int>& fast_windows,
-                                         const std::vector<int>& slow_windows) {
-  if (fast_windows.empty() || slow_windows.empty()) {
-    throw std::invalid_argument("SMA parameter grid must not be empty");
-  }
-  std::vector<SmaParameters> grid;
-  grid.reserve(fast_windows.size() * slow_windows.size());
-  for (const int fast : fast_windows) {
-    for (const int slow : slow_windows) {
-      if (fast < 1 || slow < 1) {
-        throw std::invalid_argument(
-            "SMA grid requires positive window lengths");
-      }
-      if (fast < slow) {
-        grid.push_back(SmaParameters{fast, slow});
-      }
-    }
-  }
-  if (grid.empty()) {
-    throw std::invalid_argument(
-        "SMA grid requires at least one valid fast < slow pair");
-  }
-  return grid;
-}
-
 WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
                                    const std::vector<SmaParameters>& grid,
                                    const WalkForwardConfig& config) {
@@ -167,23 +142,23 @@ WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
         bars.begin() + static_cast<std::ptrdiff_t>(test_start),
         bars.begin() + static_cast<std::ptrdiff_t>(test_end));
 
-    SmaParameters best = grid.front();
-    Performance best_training;
-    double best_metric = -std::numeric_limits<double>::infinity();
-    bool found = false;
+    SmaSweepConfig sweep_config;
+    sweep_config.backtest = config.backtest;
+    sweep_config.backtest.initial_cash = equity;
+    sweep_config.quantity = config.quantity;
+    sweep_config.threads = config.threads;
+    const auto sweep = run_sma_sweep(train_bars, grid, sweep_config);
 
-    for (const auto& parameters : grid) {
-      BacktestConfig backtest_config = config.backtest;
-      backtest_config.initial_cash = equity;
-      Backtester trainer(backtest_config);
-      SmaCrossoverStrategy strategy(parameters.fast_window,
-                                    parameters.slow_window, config.quantity);
-      const Performance training = trainer.run(train_bars, strategy);
-      const double metric = aggregate_metric(training, config.select_by_sharpe);
-      if (!found || metric > best_metric) {
-        found = true;
-        best = parameters;
-        best_training = training;
+    SmaParameters best = sweep.front().parameters;
+    Performance best_training = sweep.front().performance;
+    double best_metric =
+        aggregate_metric(best_training, config.select_by_sharpe);
+    for (std::size_t index = 1; index < sweep.size(); ++index) {
+      const double metric =
+          aggregate_metric(sweep[index].performance, config.select_by_sharpe);
+      if (metric > best_metric) {
+        best = sweep[index].parameters;
+        best_training = sweep[index].performance;
         best_metric = metric;
       }
     }

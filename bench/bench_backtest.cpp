@@ -1,4 +1,5 @@
 #include "cppquant/backtest.hpp"
+#include "cppquant/sweep.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -41,6 +42,42 @@ std::vector<Bar> generate_bars(std::size_t count, std::uint64_t seed) {
   return bars;
 }
 
+struct SweepRun {
+  double seconds{};
+  std::vector<SmaSweepResult> results;
+};
+
+SweepRun run_sweep(const std::vector<Bar>& bars, std::size_t threads,
+                   bool quick) {
+  const std::vector<SmaParameters> grid =
+      quick ? make_sma_grid({5, 10, 15, 20}, {30, 45, 60, 75})
+            : make_sma_grid({5, 10, 15, 20, 25, 30}, {30, 45, 60, 75, 90, 120});
+
+  SmaSweepConfig config;
+  config.backtest.initial_cash = 1'000'000.0;
+  config.backtest.commission_bps = 1.0;
+  config.backtest.slippage_bps = 1.0;
+  config.quantity = 100.0;
+  config.threads = threads;
+
+  const auto start = Clock::now();
+  SweepRun run;
+  run.results = run_sma_sweep(bars, grid, config);
+  run.seconds = std::chrono::duration<double>(Clock::now() - start).count();
+
+  double checksum = 0.0;
+  for (const auto& result : run.results) {
+    checksum += result.performance.final_equity +
+                result.performance.total_return +
+                static_cast<double>(result.performance.trades);
+  }
+  std::printf("sweep %zu pairs, %zu threads  %.3f s  %.1f pairs/s  "
+              "checksum %.6f\n",
+              grid.size(), threads, run.seconds,
+              static_cast<double>(grid.size()) / run.seconds, checksum);
+  return run;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -81,5 +118,17 @@ int main(int argc, char** argv) {
   std::printf("fills: %zu  final equity: %.2f  total return: %.2f%%\n",
               performance.trades, performance.final_equity,
               performance.total_return * 100.0);
+
+  const bool quick = bar_count == 100'000;
+  const SweepRun serial = run_sweep(bars, 1, quick);
+  const SweepRun parallel = run_sweep(bars, 4, quick);
+  double difference = 0.0;
+  for (std::size_t index = 0; index < serial.results.size(); ++index) {
+    difference = std::max(
+        difference, std::abs(serial.results[index].performance.final_equity -
+                             parallel.results[index].performance.final_equity));
+  }
+  std::printf("serial/parallel max equity difference: %.3e  speedup: %.2fx\n",
+              difference, serial.seconds / parallel.seconds);
   return 0;
 }

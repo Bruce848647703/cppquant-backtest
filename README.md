@@ -34,6 +34,8 @@ No third-party dependencies.
   shared cash, target quantities and portfolio equity.
 - **Walk-forward evaluation**: rolling train/test windows, in-sample parameter
   selection, stitched out-of-sample equity and CSV export.
+- **Parallel parameter sweeps**: independent SMA pairs on a worker group,
+  deterministic grid ordering and serial-equivalent results.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
   buy-and-hold.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
@@ -55,6 +57,15 @@ cmake -S . -B build-asan -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DCPPQUANT_SANITIZE=ON
 cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
+```
+
+ThreadSanitizer for the parallel sweep tests:
+
+```bash
+cmake -S . -B build-tsan -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DCPPQUANT_TSAN=ON
+cmake --build build-tsan
+./build-tsan/backtest_tests parallel
 ```
 
 Install and consume:
@@ -207,6 +218,26 @@ available in `WalkForwardResult` and the CSV export.
 See [docs/WALK_FORWARD.md](docs/WALK_FORWARD.md) for the window layout, no-leak
 rules and CSV columns.
 
+### Parallel parameter sweep
+
+```cpp
+#include "cppquant/sweep.hpp"
+
+const auto grid = make_sma_grid({5, 10, 20}, {30, 50, 80});
+
+SmaSweepConfig config;
+config.backtest.initial_cash = 100'000.0;
+config.quantity = 100.0;
+config.threads = 4;   // 0 = hardware concurrency, 1 = serial
+
+const auto results = run_sma_sweep(bars, grid, config);
+// results[i].parameters, results[i].performance
+```
+
+Results stay in grid order regardless of worker completion order. Set
+`WalkForwardConfig::threads` to parallelize each training sweep; cash still
+compounds sequentially across windows. See [docs/SWEEP.md](docs/SWEEP.md).
+
 ## Command-line backtest
 
 ```bash
@@ -270,6 +301,8 @@ Reference numbers from an Apple M-series laptop (Apple clang 21, `-O3`):
 | Workload | Bars | Time | Throughput | Fills |
 | --- | ---: | ---: | ---: | ---: |
 | SMA(10,30) backtest | 1,000,000 | 49 ms | 20.3 M bars/s | 38,221 |
+| 35-pair sweep, 1 thread | 1,000,000 | 1.65 s | 21.2 pairs/s | — |
+| 35-pair sweep, 4 threads | 1,000,000 | 0.54 s | 65.1 pairs/s | — |
 
 The engine is arithmetic-light per bar; the number mostly measures the strategy
 callback and portfolio bookkeeping. Generation of the synthetic data is
@@ -310,9 +343,11 @@ config.impact_bps = 20.0;
 
 ```text
 include/cppquant/backtest.hpp   public API
+include/cppquant/sweep.hpp      SMA grid and parallel sweep API
 src/backtest.cpp                engine, accounting, metrics, strategies
 src/csv.cpp                     single and long-format CSV loaders
 src/panel.cpp                   multi-symbol alignment and batch loop
+src/sweep.cpp                   parallel SMA parameter sweeps
 src/walk_forward.cpp            rolling parameter selection and OOS stitching
 src/validate.hpp                shared OHLC validation
 examples/backtest_cli.cpp       single-symbol CLI
@@ -339,17 +374,18 @@ and test strategy.
 - Bar data only: no ticks, order book, queue position or latency model.
 - No short-borrow costs, margin calls or per-symbol risk limits yet.
 - No margin, borrow fees, corporate actions or transaction taxes.
-- Walk-forward supports only the built-in SMA grid; a generic strategy factory
-  is not implemented.
+- Walk-forward and sweeps support only the built-in SMA strategy; a generic
+  strategy factory is not implemented.
+- Sweeps are CPU-only and recreate a worker group per call.
 - No purged/embargoed gap between training and test windows.
 - Metrics assume bars are evenly spaced and match `periods_per_year`.
 
-Natural extensions are walk-forward evaluation, a multi-asset risk model and a
-fill model with queue position and latency.
+Natural extensions are corporate actions and financing costs, a multi-asset
+risk model and a fill model with queue position and latency.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 51 tests cover:
+The repository uses a small header-only test harness. The 69 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
@@ -362,6 +398,8 @@ The repository uses a small header-only test harness. The 51 tests cover:
   last-mark equity and per-symbol close;
 - walk-forward window ordering, best-parameter selection, short final windows,
   compounding, reproducibility and CSV export;
+- serial/parallel sweep equivalence, grid ordering, direct-backtest matching,
+  worker resolution, worker exceptions and parallel walk-forward results;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;

@@ -5,6 +5,7 @@ option(CPPQUANT_BUILD_TESTS "Build the unit tests" ON)
 option(CPPQUANT_BUILD_BENCHMARKS "Build the benchmark" ON)
 option(CPPQUANT_BUILD_EXAMPLES "Build the examples" ON)
 option(CPPQUANT_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(CPPQUANT_TSAN "Build with ThreadSanitizer" OFF)
 option(CPPQUANT_WERROR "Treat compiler warnings as errors" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -25,6 +26,10 @@ function(cppquant_set_warnings target)
     endif()
 endfunction()
 
+if(CPPQUANT_SANITIZE AND CPPQUANT_TSAN)
+    message(FATAL_ERROR "CPPQUANT_SANITIZE and CPPQUANT_TSAN are mutually exclusive")
+endif()
+
 if(CPPQUANT_SANITIZE)
     if(MSVC)
         message(FATAL_ERROR "CPPQUANT_SANITIZE requires Clang or GCC")
@@ -33,10 +38,21 @@ if(CPPQUANT_SANITIZE)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+if(CPPQUANT_TSAN)
+    if(MSVC)
+        message(FATAL_ERROR "CPPQUANT_TSAN requires Clang or GCC")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+endif()
+
+find_package(Threads REQUIRED)
+
 add_library(cppquant_backtest
     src/backtest.cpp
     src/csv.cpp
     src/panel.cpp
+    src/sweep.cpp
     src/walk_forward.cpp
 )
 add_library(cppquant::backtest ALIAS cppquant_backtest)
@@ -45,6 +61,7 @@ target_include_directories(cppquant_backtest PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(cppquant_backtest PUBLIC cxx_std_20)
+target_link_libraries(cppquant_backtest PUBLIC Threads::Threads)
 set_target_properties(cppquant_backtest PROPERTIES EXPORT_NAME backtest)
 cppquant_set_warnings(cppquant_backtest)
 
@@ -83,6 +100,7 @@ if(CPPQUANT_BUILD_TESTS)
         tests/main.cpp
         tests/test_backtest.cpp
         tests/test_panel.cpp
+        tests/test_sweep.cpp
         tests/test_walk_forward.cpp
     )
     target_link_libraries(backtest_tests PRIVATE cppquant::backtest)

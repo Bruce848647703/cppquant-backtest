@@ -218,6 +218,17 @@ and test fill count.
 `WalkForwardResult` computes aggregate OOS return, volatility, Sharpe and
 drawdown from the stitched equity curve.
 
+## Parallel sweeps
+
+`run_sma_sweep` stores one result per grid index and lets workers claim indices
+from an atomic counter. Each worker owns a `Backtester`; the bar vector is
+read-only. Output order and tie-breaking do not depend on scheduling. The first
+worker exception is captured and rethrown after all workers join.
+
+`WalkForwardConfig::threads` forwards to each training sweep. Windows still run
+sequentially because the starting cash of a window is the ending equity of the
+previous one.
+
 ## Performance metrics
 
 Let `E_0 ... E_n` be the equity curve and `T` the number of return periods
@@ -313,6 +324,8 @@ which makes every fill and cash movement predictable. They verify:
   execution and the single-symbol adapter;
 - walk-forward window ordering, no-overlap validation, parameter selection,
   short final windows, compounding, reproducibility and CSV export;
+- serial/parallel sweep equivalence, grid ordering, direct-backtest matching
+  and worker exception propagation;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against
@@ -322,14 +335,15 @@ which makes every fill and cash movement predictable. They verify:
 - configuration and order validation;
 - state reset when the same engine is reused.
 
-CI runs the suite with GCC, Clang and Apple clang, plus ASan/UBSan. The
-benchmark runs in `--quick` mode as a smoke test.
+CI runs the suite with GCC, Clang and Apple clang, plus ASan/UBSan. A separate
+TSan job runs the parallel sweep and walk-forward tests. The benchmark runs in
+`--quick` mode as a smoke test.
 
 ## Possible extensions
 
 - A portfolio of instruments with per-symbol positions and marks.
 - Queue position, latency and tick-level fills.
 - Discrete dividends, splits and borrow costs.
-- Walk-forward parameter sweeps with out-of-sample reporting.
+- Cross-process or GPU sweeps for very large grids.
 - An equity-curve export (CSV/JSON) for plotting.
 - A reference vector implementation for property-based tests of accounting.

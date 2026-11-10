@@ -1,20 +1,13 @@
 #pragma once
 
 #include "cppquant/backtest.hpp"
+#include "cppquant/sweep.hpp"
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
 namespace cppquant {
-
-struct SmaParameters {
-  int fast_window{};
-  int slow_window{};
-};
-
-std::vector<SmaParameters> make_sma_grid(const std::vector<int>& fast_windows,
-                                         const std::vector<int>& slow_windows);
 
 struct WalkForwardConfig {
   std::size_t train_bars{252};
@@ -28,6 +21,9 @@ struct WalkForwardConfig {
   BacktestConfig backtest;
   /// Select by Sharpe ratio instead of total return on the training window.
   bool select_by_sharpe{false};
+  /// Worker count for each training sweep. Zero selects hardware concurrency;
+  /// one runs serially. Results are deterministic either way.
+  std::size_t threads{0};
 };
 
 struct WalkForwardWindow {

@@ -38,6 +38,13 @@ All notable changes to this project are documented here.
 - Per-window metrics, aggregate OOS statistics, CSV export and CLI.
 - Walk-forward tests for ordering, no overlap, selection, short windows,
   reproducibility and export.
+- `run_sma_sweep` with a worker group, deterministic grid ordering and
+  serial-equivalent results.
+- `WalkForwardConfig::threads` for parallel training sweeps.
+- Sweep tests for serial/parallel equivalence, direct-backtest matching, worker
+  resolution, exception propagation and parallel walk-forward results.
+- Serial-versus-four-thread sweep benchmark and `docs/SWEEP.md`.
+- Optional TSan build and CI job for the parallel sweep tests.
 
 ### Planned
 

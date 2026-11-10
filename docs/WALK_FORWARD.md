@@ -68,6 +68,7 @@ WalkForwardConfig config;
 config.train_bars = 252;
 config.test_bars = 63;
 config.quantity = 100.0;
+config.threads = 4;   // 0 = hardware concurrency, 1 = serial
 
 const auto result = run_walk_forward(bars, grid, config);
 for (const auto& window : result.windows) {
@@ -107,6 +108,8 @@ Indices are half-open bar offsets into the input series.
 - Tests verify window ordering, non-overlapping test segments, short final
   windows, no-window behaviour, compounding, reproducibility, CSV rows and
   best-parameter selection on a trend.
+- Parallel and serial runs are compared window by window; the worker count must
+  not change any result.
 
 ## Limitations
 
@@ -119,3 +122,5 @@ Indices are half-open bar offsets into the input series.
   actual timestamp spacing.
 - Only the built-in SMA strategy is wired into the walk-forward runner. A
   generic strategy factory is a natural extension.
+- Training sweeps are parallelized, but windows remain sequential because cash
+  compounds.

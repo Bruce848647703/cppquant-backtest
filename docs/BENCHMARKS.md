@@ -52,7 +52,22 @@ training backtest, plus one test backtest per window. The sample run (300 bars,
 second. A dedicated grid-size/window-count benchmark will be added with the
 parallel sweep work.
 
+## W6: parallel sweeps
+
+The benchmark builds the 35 valid `fast < slow` pairs from
+`{5,10,15,20,25,30} x {30,45,60,75,90,120}` and runs each pair over 1,000,000
+bars. Every final equity is compared between runs.
+
+| Threads | Pairs | Time | Throughput | Max equity difference |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 35 | 1.65 s | 21.2 pairs/s | — |
+| 4 | 35 | 0.54 s | 65.1 pairs/s | 0.0 |
+
+The four-thread run is **3.06x** faster, above the 2x acceptance target. The
+speedup is sub-linear because each backtest allocates its own engine state and
+the host has other work. `backtest_bench --quick` uses 100,000 bars and 16 pairs
+for CI.
+
 ## Planned baselines
 
-- W6: parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.
