@@ -45,6 +45,15 @@ All notable changes to this project are documented here.
   resolution, exception propagation and parallel walk-forward results.
 - Serial-versus-four-thread sweep benchmark and `docs/SWEEP.md`.
 - Optional TSan build and CI job for the parallel sweep tests.
+- Split actions that adjust position quantity, average cost, marks and pending
+  orders.
+- Cash dividends for long and short positions.
+- Configurable margin costs on negative cash and borrow costs on short
+  positions, with actual/365 accrual and per-run totals.
+- `load_corporate_actions_csv`, sample data and CLI `--actions`,
+  `--margin-rate` and `--borrow-rate` flags.
+- Corporate-action tests for equity invariance, dividends, financing and
+  malformed events, plus `docs/CORPORATE_ACTIONS.md`.
 
 ### Planned
 

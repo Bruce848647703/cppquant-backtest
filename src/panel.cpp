@@ -81,12 +81,30 @@ void SingleSymbolBatchStrategy::on_batch(const BarBatch& batch,
 
 Performance Backtester::run_batch(const std::vector<BarBatch>& batches,
                                   const std::string& trade_symbol,
-                                  BatchStrategy& strategy) {
+                                  BatchStrategy& strategy,
+                                  const std::vector<CorporateAction>& actions) {
   if (batches.empty()) {
     throw std::invalid_argument("batch backtest requires at least one batch");
   }
   if (trade_symbol.empty()) {
     throw std::invalid_argument("trade symbol must not be empty");
+  }
+
+  std::unordered_set<std::string> known_symbols;
+  for (const auto& batch : batches) {
+    for (const auto& entry : batch.bars) {
+      known_symbols.insert(entry.symbol);
+    }
+  }
+  const auto prepared_actions = detail::prepare_corporate_actions(actions);
+  for (const auto& action : prepared_actions) {
+    if (action.symbol.empty()) {
+      throw std::invalid_argument("batch corporate actions require a symbol");
+    }
+    if (known_symbols.find(action.symbol) == known_symbols.end()) {
+      throw std::invalid_argument(
+          "corporate action references unknown symbol " + action.symbol);
+    }
   }
 
   for (std::size_t index = 0; index < batches.size(); ++index) {
@@ -119,8 +137,22 @@ Performance Backtester::run_batch(const std::vector<BarBatch>& batches,
   reset();
   default_symbol_ = trade_symbol;
 
+  std::size_t action_index = 0;
   for (std::size_t index = 0; index < batches.size(); ++index) {
     current_bar_ = static_cast<std::int64_t>(index);
+    const double days =
+        index == 0 ? 0.0
+                   : static_cast<double>(batches[index].timestamp -
+                                         batches[index - 1].timestamp) /
+                         86'400.0;
+    apply_financing(days);
+    while (action_index < prepared_actions.size() &&
+           prepared_actions[action_index].timestamp <=
+               batches[index].timestamp) {
+      apply_corporate_action(prepared_actions[action_index]);
+      ++action_index;
+    }
+
     std::unordered_map<std::string, const Bar*> batch_bars;
     batch_bars.reserve(batches[index].bars.size());
     for (const auto& entry : batches[index].bars) {

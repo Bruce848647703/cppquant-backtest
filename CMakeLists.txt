@@ -100,6 +100,7 @@ if(CPPQUANT_BUILD_TESTS)
         tests/main.cpp
         tests/test_backtest.cpp
         tests/test_panel.cpp
+        tests/test_corporate_actions.cpp
         tests/test_sweep.cpp
         tests/test_walk_forward.cpp
     )
@@ -116,6 +117,14 @@ if(CPPQUANT_BUILD_TESTS)
                     --fast 5 --slow 20 --quantity 100
         )
         set_tests_properties(backtest_cli_sample PROPERTIES TIMEOUT 60)
+
+        add_test(NAME backtest_cli_actions
+            COMMAND backtest_cli --csv ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_bars.csv
+                    --strategy buyhold --quantity 100
+                    --actions ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_corporate_actions.csv
+                    --margin-rate 0.02 --borrow-rate 0.01
+        )
+        set_tests_properties(backtest_cli_actions PROPERTIES TIMEOUT 60)
 
         add_test(NAME panel_backtest_sample
             COMMAND panel_backtest ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_multi.csv 10

@@ -146,6 +146,31 @@ struct Fill {
   std::string symbol;
 };
 
+enum class CorporateActionType : std::uint8_t {
+  Split,
+  CashDividend,
+};
+
+/// One corporate action. `value` is the split ratio (new shares per old
+/// share) or the cash dividend per share. Single-symbol runs ignore the symbol
+/// field; batch runs apply the action only to the matching symbol.
+struct CorporateAction {
+  std::int64_t timestamp{};
+  std::string symbol;
+  CorporateActionType type{CorporateActionType::Split};
+  double value{};
+};
+
+inline const char* to_string(CorporateActionType type) noexcept {
+  switch (type) {
+  case CorporateActionType::Split:
+    return "split";
+  case CorporateActionType::CashDividend:
+    return "cash-dividend";
+  }
+  return "unknown";
+}
+
 struct BacktestConfig {
   double initial_cash{100'000.0};
   /// Commission in basis points of notional, charged on both sides.
@@ -165,6 +190,10 @@ struct BacktestConfig {
   double periods_per_year{252.0};
   /// Annual risk-free rate used for the Sharpe ratio.
   double risk_free_rate{0.0};
+  /// Annual rate charged on negative cash balances.
+  double margin_rate{0.0};
+  /// Annual rate charged on the market value of short positions.
+  double borrow_rate{0.0};
 };
 
 struct Performance {
@@ -178,6 +207,9 @@ struct Performance {
   double turnover{};
   double win_rate{};
   double total_commission{};
+  double total_dividends{};
+  double total_margin_cost{};
+  double total_borrow_cost{};
   double realized_pnl{};
   double final_position{};
   std::size_t bars{};
@@ -232,15 +264,20 @@ public:
   explicit Backtester(BacktestConfig config = {});
 
   /// Run `strategy` over `bars` and return the performance summary. Calling
-  /// run again resets all state.
-  Performance run(const std::vector<Bar>& bars, Strategy& strategy);
+  /// run again resets all state. Corporate actions are applied at the first
+  /// bar whose timestamp is at or after the action timestamp, before pending
+  /// orders execute.
+  Performance run(const std::vector<Bar>& bars, Strategy& strategy,
+                  const std::vector<CorporateAction>& actions = {});
 
   /// Run a batch strategy. Orders execute against `trade_symbol`; the strategy
   /// can inspect every symbol in the batch. Every batch must contain
-  /// `trade_symbol` and timestamps must be strictly increasing.
+  /// `trade_symbol` and timestamps must be strictly increasing. Corporate
+  /// actions must reference a symbol present in the batches.
   Performance run_batch(const std::vector<BarBatch>& batches,
                         const std::string& trade_symbol,
-                        BatchStrategy& strategy);
+                        BatchStrategy& strategy,
+                        const std::vector<CorporateAction>& actions = {});
 
   /// Market order entry, callable from Strategy::on_bar. The overload
   /// without a symbol uses the default symbol of the current run.
@@ -371,6 +408,8 @@ private:
   double effective_slippage_bps(const Bar& bar, double quantity) const;
   void expire_day_orders();
   void remove_pending(OrderId id);
+  void apply_financing(double days);
+  void apply_corporate_action(const CorporateAction& action);
   Performance summarize(std::size_t bar_count) const;
   void reset();
 
@@ -378,6 +417,9 @@ private:
   double cash_{};
   double total_commission_{};
   double total_notional_{};
+  double total_dividends_{};
+  double total_margin_cost_{};
+  double total_borrow_cost_{};
   OrderId next_order_id_{1};
   std::int64_t current_bar_{-1};
   std::string default_symbol_;
@@ -399,6 +441,12 @@ std::vector<Bar> load_bars_csv(const std::string& path);
 /// Load a long-format `timestamp,symbol,open,high,low,close,volume` CSV into
 /// an aligned panel. Header lines and `#` comments are ignored.
 BarPanel load_bar_panel_csv(const std::string& path);
+
+/// Load `timestamp,symbol,type,value` corporate actions. `type` is `split` or
+/// `dividend`/`cash_dividend`. Header lines and `#` comments are ignored.
+/// Actions are returned in timestamp order, preserving input order for ties.
+std::vector<CorporateAction>
+load_corporate_actions_csv(const std::string& path);
 
 /// Long-only or long/short moving-average crossover.
 class SmaCrossoverStrategy : public Strategy {

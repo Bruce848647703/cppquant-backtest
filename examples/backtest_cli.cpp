@@ -16,6 +16,7 @@ namespace {
 
 struct Config {
   std::string csv_path;
+  std::string actions_path;
   std::string strategy{"sma"};
   int fast{10};
   int slow{30};
@@ -46,7 +47,11 @@ void print_usage(const char* program) {
       "  --commission-bps N       commission in basis points (default 1)\n"
       "  --slippage-bps N         slippage in basis points (default 1)\n"
       "  --rf N                   annual risk-free rate (default 0)\n"
+      "  --margin-rate N          annual rate on negative cash (default 0)\n"
+      "  --borrow-rate N          annual rate on short market value (default "
+      "0)\n"
       "  --periods-per-year N     bars per year (default 252)\n"
+      "  --actions PATH           corporate actions CSV\n"
       "  --fills                  print the first fills\n"
       "  --help                   show this message\n",
       program);
@@ -66,6 +71,11 @@ Config parse(int argc, char** argv) {
         throw std::invalid_argument("missing value for --csv");
       }
       config.csv_path = argv[++index];
+    } else if (flag == "--actions") {
+      if (index + 1 >= argc) {
+        throw std::invalid_argument("missing value for --actions");
+      }
+      config.actions_path = argv[++index];
     } else if (flag == "--strategy") {
       if (index + 1 >= argc) {
         throw std::invalid_argument("missing value for --strategy");
@@ -92,6 +102,12 @@ Config parse(int argc, char** argv) {
           next_value(index, argc, argv, "--slippage-bps");
     } else if (flag == "--rf") {
       config.backtest.risk_free_rate = next_value(index, argc, argv, "--rf");
+    } else if (flag == "--margin-rate") {
+      config.backtest.margin_rate =
+          next_value(index, argc, argv, "--margin-rate");
+    } else if (flag == "--borrow-rate") {
+      config.backtest.borrow_rate =
+          next_value(index, argc, argv, "--borrow-rate");
     } else if (flag == "--periods-per-year") {
       config.backtest.periods_per_year =
           next_value(index, argc, argv, "--periods-per-year");
@@ -125,6 +141,9 @@ int main(int argc, char** argv) {
   try {
     const Config config = parse(argc, argv);
     const auto bars = load_bars_csv(config.csv_path);
+    const auto actions = config.actions_path.empty()
+                             ? std::vector<CorporateAction>{}
+                             : load_corporate_actions_csv(config.actions_path);
     Backtester engine(config.backtest);
 
     std::unique_ptr<Strategy> strategy;
@@ -135,7 +154,7 @@ int main(int argc, char** argv) {
       strategy = std::make_unique<BuyAndHoldStrategy>(config.quantity);
     }
 
-    const Performance performance = engine.run(bars, *strategy);
+    const Performance performance = engine.run(bars, *strategy, actions);
 
     std::printf("cppquant-backtest\n");
     std::printf("data: %s\n", config.csv_path.c_str());
@@ -166,6 +185,11 @@ int main(int argc, char** argv) {
     std::printf("  win rate            %13.2f%%\n",
                 performance.win_rate * 100.0);
     std::printf("  commission paid     %14.2f\n", performance.total_commission);
+    std::printf("  dividends           %14.2f\n", performance.total_dividends);
+    std::printf("  margin cost         %14.2f\n",
+                performance.total_margin_cost);
+    std::printf("  borrow cost         %14.2f\n",
+                performance.total_borrow_cost);
     std::printf("  realized pnl        %14.2f\n", performance.realized_pnl);
     std::printf("  final position      %14.4f\n\n", performance.final_position);
 

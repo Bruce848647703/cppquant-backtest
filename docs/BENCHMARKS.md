@@ -68,6 +68,17 @@ speedup is sub-linear because each backtest allocates its own engine state and
 the host has other work. `backtest_bench --quick` uses 100,000 bars and 16 pairs
 for CI.
 
+## W7: corporate actions and financing
+
+Corporate actions are event-driven and do not touch the bar hot loop. When
+financing is enabled, each bar performs one scan over open positions to accrue
+margin and borrow costs; with a flat book this is a few integer comparisons.
+The existing 1M-bar SMA benchmark is unchanged within run-to-run noise.
+
+No separate throughput table is reported because the cost scales with the
+number of open positions, not bars. The accounting identities and day-count
+formulas are covered by unit tests.
+
 ## Planned baselines
 
-- W7: corporate-action and financing-cost overhead.
+- W8: final release numbers.

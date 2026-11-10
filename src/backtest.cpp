@@ -38,6 +38,12 @@ Backtester::Backtester(BacktestConfig config) : config_(config) {
   if (!std::isfinite(config_.risk_free_rate)) {
     throw std::invalid_argument("risk-free rate must be finite");
   }
+  if (!std::isfinite(config_.margin_rate)) {
+    throw std::invalid_argument("margin rate must be finite");
+  }
+  if (!std::isfinite(config_.borrow_rate)) {
+    throw std::invalid_argument("borrow rate must be finite");
+  }
   reset();
 }
 
@@ -45,6 +51,9 @@ void Backtester::reset() {
   cash_ = config_.initial_cash;
   total_commission_ = 0.0;
   total_notional_ = 0.0;
+  total_dividends_ = 0.0;
+  total_margin_cost_ = 0.0;
+  total_borrow_cost_ = 0.0;
   next_order_id_ = 1;
   current_bar_ = -1;
   default_symbol_.clear();
@@ -587,6 +596,77 @@ void Backtester::execute_pending(
   pending_ = std::move(still_pending);
 }
 
+void Backtester::apply_financing(double days) {
+  if (!(days > 0.0)) {
+    return;
+  }
+  const double year_fraction = days / 365.0;
+
+  if (cash_ < 0.0 && config_.margin_rate != 0.0) {
+    const double cost = -cash_ * config_.margin_rate * year_fraction;
+    cash_ -= cost;
+    total_margin_cost_ += cost;
+  }
+
+  for (const auto& [symbol, position] : positions_) {
+    if (position.quantity >= 0.0 || config_.borrow_rate == 0.0) {
+      continue;
+    }
+    const auto mark = marks_.find(symbol);
+    const double price =
+        mark == marks_.end() ? position.average_cost : mark->second;
+    const double cost =
+        -position.quantity * price * config_.borrow_rate * year_fraction;
+    cash_ -= cost;
+    total_borrow_cost_ += cost;
+  }
+}
+
+void Backtester::apply_corporate_action(const CorporateAction& action) {
+  if (action.type == CorporateActionType::Split) {
+    for (auto& [symbol, position] : positions_) {
+      if (!action.symbol.empty() && !symbol.empty() &&
+          symbol != action.symbol) {
+        continue;
+      }
+      position.quantity *= action.value;
+      position.average_cost /= action.value;
+      const auto mark = marks_.find(symbol);
+      if (mark != marks_.end()) {
+        mark->second /= action.value;
+      }
+    }
+
+    for (auto& [id, order] : orders_) {
+      if (!action.symbol.empty() && !order.symbol.empty() &&
+          order.symbol != action.symbol) {
+        continue;
+      }
+      if (order.status != OrderStatus::Pending &&
+          order.status != OrderStatus::PartiallyFilled) {
+        continue;
+      }
+      order.quantity *= action.value;
+      order.filled_quantity *= action.value;
+      order.limit_price /= action.value;
+      order.stop_price /= action.value;
+      if (order.average_fill_price > 0.0) {
+        order.average_fill_price /= action.value;
+      }
+    }
+    return;
+  }
+
+  for (const auto& [symbol, position] : positions_) {
+    if (!action.symbol.empty() && !symbol.empty() && symbol != action.symbol) {
+      continue;
+    }
+    const double cash = position.quantity * action.value;
+    cash_ += cash;
+    total_dividends_ += cash;
+  }
+}
+
 void Backtester::expire_day_orders() {
   for (auto iterator = pending_.begin(); iterator != pending_.end();) {
     auto order_iterator = orders_.find(*iterator);
@@ -601,19 +681,37 @@ void Backtester::expire_day_orders() {
   }
 }
 
-Performance Backtester::run(const std::vector<Bar>& bars, Strategy& strategy) {
+Performance Backtester::run(const std::vector<Bar>& bars, Strategy& strategy,
+                            const std::vector<CorporateAction>& actions) {
   if (bars.empty()) {
     throw std::invalid_argument("backtest requires at least one bar");
   }
   for (std::size_t index = 0; index < bars.size(); ++index) {
     detail::validate_bar(bars[index], "bar " + std::to_string(index));
+    if (index > 0 && bars[index].timestamp <= bars[index - 1].timestamp) {
+      throw std::invalid_argument("bar timestamps must be strictly increasing");
+    }
   }
+  const auto prepared_actions = detail::prepare_corporate_actions(actions);
 
   reset();
   default_symbol_.clear();
 
+  std::size_t action_index = 0;
   for (std::size_t index = 0; index < bars.size(); ++index) {
     current_bar_ = static_cast<std::int64_t>(index);
+    const double days = index == 0
+                            ? 0.0
+                            : static_cast<double>(bars[index].timestamp -
+                                                  bars[index - 1].timestamp) /
+                                  86'400.0;
+    apply_financing(days);
+    while (action_index < prepared_actions.size() &&
+           prepared_actions[action_index].timestamp <= bars[index].timestamp) {
+      apply_corporate_action(prepared_actions[action_index]);
+      ++action_index;
+    }
+
     if (index > 0) {
       execute_pending(bars[index]);
     }
@@ -646,6 +744,9 @@ Performance Backtester::summarize(std::size_t bar_count) const {
     }
   }
   performance.total_commission = total_commission_;
+  performance.total_dividends = total_dividends_;
+  performance.total_margin_cost = total_margin_cost_;
+  performance.total_borrow_cost = total_borrow_cost_;
 
   const std::size_t closed_trades =
       performance.winning_trades + performance.losing_trades;

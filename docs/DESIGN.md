@@ -229,6 +229,19 @@ worker exception is captured and rethrown after all workers join.
 sequentially because the starting cash of a window is the ending equity of the
 previous one.
 
+## Corporate actions and financing
+
+Corporate actions are sorted by timestamp and applied at the first bar whose
+timestamp is at or after the event, before pending orders execute. Splits scale
+positions, average cost, marks and open-order prices/quantities; cash
+dividends credit or debit cash directly. Batch runs require event symbols that
+exist in the input.
+
+Financing accrues at the start of each bar from the previous marks:
+`max(-cash,0) * margin_rate * days / 365` plus short market value times
+`borrow_rate * days / 365`. The first bar has no accrual. Totals are carried in
+`Performance`.
+
 ## Performance metrics
 
 Let `E_0 ... E_n` be the equity curve and `T` the number of return periods
@@ -326,6 +339,8 @@ which makes every fill and cash movement predictable. They verify:
   short final windows, compounding, reproducibility and CSV export;
 - serial/parallel sweep equivalence, grid ordering, direct-backtest matching
   and worker exception propagation;
+- split invariance, pending-order rescaling, dividend cash flows, margin and
+  borrow accrual and corporate-action CSV validation;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against

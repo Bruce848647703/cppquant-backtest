@@ -178,4 +178,68 @@ BarPanel load_bar_panel_csv(const std::string& path) {
   return BarPanel(std::move(series));
 }
 
+std::vector<CorporateAction>
+load_corporate_actions_csv(const std::string& path) {
+  std::ifstream file(path);
+  if (!file) {
+    throw std::runtime_error("cannot open " + path);
+  }
+
+  std::vector<CorporateAction> actions;
+  std::string line;
+  std::size_t line_number = 0;
+  bool first_content_line = true;
+
+  while (std::getline(file, line)) {
+    ++line_number;
+    const std::string cleaned = trim(line);
+    if (cleaned.empty() || cleaned[0] == '#') {
+      continue;
+    }
+
+    const auto fields = split(cleaned);
+    if (first_content_line) {
+      first_content_line = false;
+      try {
+        (void)std::stoll(fields.front());
+      } catch (const std::exception&) {
+        continue;
+      }
+    }
+
+    if (fields.size() < 4) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                               ": expected 4 columns");
+    }
+
+    CorporateAction action;
+    try {
+      action.timestamp = std::stoll(fields[0]);
+      action.value = std::stod(fields[3]);
+    } catch (const std::invalid_argument&) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                               ": invalid number");
+    } catch (const std::out_of_range&) {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                               ": number out of range");
+    }
+    action.symbol = trim(fields[1]);
+    const std::string type = trim(fields[2]);
+    if (type == "split") {
+      action.type = CorporateActionType::Split;
+    } else if (type == "dividend" || type == "cash_dividend" ||
+               type == "cash-dividend") {
+      action.type = CorporateActionType::CashDividend;
+    } else {
+      throw std::runtime_error("line " + std::to_string(line_number) +
+                               ": unknown corporate action type " + type);
+    }
+    detail::validate_corporate_action(action,
+                                      "line " + std::to_string(line_number));
+    actions.push_back(std::move(action));
+  }
+
+  return detail::prepare_corporate_actions(actions);
+}
+
 } // namespace cppquant

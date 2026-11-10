@@ -36,6 +36,10 @@ No third-party dependencies.
   selection, stitched out-of-sample equity and CSV export.
 - **Parallel parameter sweeps**: independent SMA pairs on a worker group,
   deterministic grid ordering and serial-equivalent results.
+- **Corporate actions**: split quantity/cost adjustment, cash dividends and a
+  validated event CSV loader.
+- **Financing costs**: actual/365 margin on negative cash and borrow costs on
+  short positions, with per-run totals.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
   buy-and-hold.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
@@ -238,6 +242,25 @@ Results stay in grid order regardless of worker completion order. Set
 `WalkForwardConfig::threads` to parallelize each training sweep; cash still
 compounds sequentially across windows. See [docs/SWEEP.md](docs/SWEEP.md).
 
+### Corporate actions and financing
+
+```cpp
+const auto actions =
+    load_corporate_actions_csv("data/sample_corporate_actions.csv");
+
+BacktestConfig config;
+config.margin_rate = 0.02;   // annual rate on negative cash
+config.borrow_rate = 0.01;   // annual rate on short market value
+
+const Performance result = engine.run(bars, strategy, actions);
+// result.total_dividends, total_margin_cost, total_borrow_cost
+```
+
+Splits adjust position quantity, average cost, marks and open orders. Cash
+dividends credit long positions and debit shorts. See
+[docs/CORPORATE_ACTIONS.md](docs/CORPORATE_ACTIONS.md) for the event format,
+timing and day-count rules.
+
 ## Command-line backtest
 
 ```bash
@@ -345,7 +368,7 @@ config.impact_bps = 20.0;
 include/cppquant/backtest.hpp   public API
 include/cppquant/sweep.hpp      SMA grid and parallel sweep API
 src/backtest.cpp                engine, accounting, metrics, strategies
-src/csv.cpp                     single and long-format CSV loaders
+src/csv.cpp                     bar, panel and corporate-action loaders
 src/panel.cpp                   multi-symbol alignment and batch loop
 src/sweep.cpp                   parallel SMA parameter sweeps
 src/walk_forward.cpp            rolling parameter selection and OOS stitching
@@ -372,20 +395,20 @@ and test strategy.
 ## Limitations
 
 - Bar data only: no ticks, order book, queue position or latency model.
-- No short-borrow costs, margin calls or per-symbol risk limits yet.
-- No margin, borrow fees, corporate actions or transaction taxes.
+- No margin calls, buying-power constraints or per-symbol risk limits.
+- No transaction taxes, withholding or dividend payable dates.
 - Walk-forward and sweeps support only the built-in SMA strategy; a generic
   strategy factory is not implemented.
 - Sweeps are CPU-only and recreate a worker group per call.
 - No purged/embargoed gap between training and test windows.
 - Metrics assume bars are evenly spaced and match `periods_per_year`.
 
-Natural extensions are corporate actions and financing costs, a multi-asset
-risk model and a fill model with queue position and latency.
+Natural extensions are a multi-asset risk model, a fill model with queue
+position and latency, and a broader corporate-action event set.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 69 tests cover:
+The repository uses a small header-only test harness. The 79 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
@@ -400,6 +423,8 @@ The repository uses a small header-only test harness. The 69 tests cover:
   compounding, reproducibility and CSV export;
 - serial/parallel sweep equivalence, grid ordering, direct-backtest matching,
   worker resolution, worker exceptions and parallel walk-forward results;
+- split equity invariance, pending-order adjustment, long/short dividends,
+  margin and borrow accrual, batch symbol matching and action CSV validation;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;
