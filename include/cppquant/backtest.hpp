@@ -5,6 +5,7 @@
 #include <deque>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace cppquant {
@@ -18,6 +19,62 @@ struct Bar {
   double low{};
   double close{};
   double volume{};
+};
+
+struct SymbolSeries {
+  std::string symbol;
+  std::vector<Bar> bars;
+};
+
+struct SymbolBar {
+  std::string symbol;
+  Bar bar;
+};
+
+/// One timestamp across several symbols. Symbols with no bar at this
+/// timestamp are simply absent from `bars`.
+struct BarBatch {
+  std::int64_t timestamp{};
+  std::vector<SymbolBar> bars;
+
+  const Bar* find(const std::string& symbol) const noexcept {
+    for (const auto& entry : bars) {
+      if (entry.symbol == symbol) {
+        return &entry.bar;
+      }
+    }
+    return nullptr;
+  }
+
+  bool contains(const std::string& symbol) const noexcept {
+    return find(symbol) != nullptr;
+  }
+};
+
+/// Aligned multi-symbol bars built from per-symbol series.
+///
+/// The panel uses the union of all timestamps. Each batch contains the symbols
+/// that have a bar at that timestamp; missing bars are counted per symbol.
+class BarPanel {
+public:
+  explicit BarPanel(std::vector<SymbolSeries> series);
+
+  const std::vector<std::string>& symbols() const noexcept {
+    return symbols_;
+  }
+  const std::vector<BarBatch>& batches() const noexcept {
+    return batches_;
+  }
+  std::size_t missing_bars() const noexcept {
+    return missing_bars_;
+  }
+  std::size_t missing_bars(const std::string& symbol) const;
+
+private:
+  std::vector<std::string> symbols_;
+  std::vector<BarBatch> batches_;
+  std::unordered_map<std::string, std::size_t> missing_by_symbol_;
+  std::size_t missing_bars_{};
 };
 
 enum class Side : std::uint8_t { Buy, Sell };
@@ -139,6 +196,28 @@ public:
   virtual void on_bar(const Bar& bar, Backtester& engine) = 0;
 };
 
+/// Strategy callback for aligned multi-symbol batches. Orders still execute
+/// against the `trade_symbol` passed to `Backtester::run_batch`; W4 adds
+/// multi-asset position accounting.
+class BatchStrategy {
+public:
+  virtual ~BatchStrategy() = default;
+  virtual void on_batch(const BarBatch& batch, Backtester& engine) = 0;
+};
+
+/// Adapter that exposes one symbol of a batch to a single-symbol strategy.
+class SingleSymbolBatchStrategy : public BatchStrategy {
+public:
+  SingleSymbolBatchStrategy(std::string symbol, Strategy& strategy)
+      : symbol_(std::move(symbol)), strategy_(strategy) {}
+
+  void on_batch(const BarBatch& batch, Backtester& engine) override;
+
+private:
+  std::string symbol_;
+  Strategy& strategy_;
+};
+
 /// Single-instrument event-driven backtester.
 ///
 /// Market, limit, stop and stop-limit orders are submitted from a strategy and
@@ -152,6 +231,13 @@ public:
   /// Run `strategy` over `bars` and return the performance summary. Calling
   /// run again resets all state.
   Performance run(const std::vector<Bar>& bars, Strategy& strategy);
+
+  /// Run a batch strategy. Orders execute against `trade_symbol`; the strategy
+  /// can inspect every symbol in the batch. Every batch must contain
+  /// `trade_symbol` and timestamps must be strictly increasing.
+  Performance run_batch(const std::vector<BarBatch>& batches,
+                        const std::string& trade_symbol,
+                        BatchStrategy& strategy);
 
   /// Market order entry, callable from Strategy::on_bar.
   OrderId buy(double quantity, TimeInForce tif = TimeInForce::GoodTilCancelled);
@@ -236,6 +322,7 @@ private:
   double effective_slippage_bps(const Bar& bar, double quantity) const;
   void expire_day_orders();
   void remove_pending(OrderId id);
+  Performance summarize(std::size_t bar_count) const;
   void reset();
 
   BacktestConfig config_;
@@ -261,6 +348,10 @@ private:
 /// starting with `#` are ignored; a header line is skipped. Throws
 /// std::runtime_error on I/O or parse errors.
 std::vector<Bar> load_bars_csv(const std::string& path);
+
+/// Load a long-format `timestamp,symbol,open,high,low,close,volume` CSV into
+/// an aligned panel. Header lines and `#` comments are ignored.
+BarPanel load_bar_panel_csv(const std::string& path);
 
 /// Long-only or long/short moving-average crossover.
 class SmaCrossoverStrategy : public Strategy {

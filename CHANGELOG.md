@@ -22,6 +22,11 @@ All notable changes to this project are documented here.
 - Fixed-bps, half-spread and square-root impact slippage models.
 - Tests for participation, aggregate liquidity, day expiry after partial
   fills, partial cancellation and slippage models.
+- `BarBatch` and `BarPanel` union alignment with per-symbol missing-bar counts.
+- `BatchStrategy`, `SingleSymbolBatchStrategy` and `Backtester::run_batch`.
+- Long-format multi-symbol CSV loader, sample data and `panel_backtest` CLI.
+- Tests for alignment, invalid series, loading, batch execution and the
+  single-symbol adapter.
 
 ### Planned
 

@@ -462,8 +462,15 @@ Performance Backtester::run(const std::vector<Bar>& bars, Strategy& strategy) {
     equity_timestamps_.push_back(bars[index].timestamp);
   }
 
+  return summarize(bars.size());
+}
+
+
+
+Performance Backtester::summarize(std::size_t bar_count) const {
   Performance performance;
-  performance.bars = bars.size();
+
+  performance.bars = bar_count;
   performance.initial_equity = config_.initial_cash;
   performance.final_equity = equity_curve_.back();
   performance.total_return =

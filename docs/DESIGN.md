@@ -2,10 +2,11 @@
 
 ## Scope
 
-`cppquant-backtest` is a deliberately small event-driven backtester for a
-single instrument and bar data. It prioritizes deterministic accounting and a
-clear execution model over feature breadth: no order book, no partial fills, no
-multi-asset portfolio, no parameter optimization.
+`cppquant-backtest` is a deliberately small event-driven backtester for bar
+data. It prioritizes deterministic accounting and a clear execution model over
+feature breadth: no order book, no multi-asset portfolio yet, no parameter
+optimization. W3 adds multi-symbol input and batch strategies while keeping
+execution against one trade symbol; W4 adds multi-asset accounting.
 
 ## Event loop
 
@@ -120,6 +121,36 @@ side, price, quantity, commission and order id.
 `order_target(target)` subtracts the current position **and any pending signed
 quantity** from the target before submitting. Calling it every bar is therefore
 idempotent once the target is reached; it does not stack duplicate orders.
+
+## Multi-symbol panels
+
+`BarPanel` takes one `SymbolSeries` per symbol and aligns them on the union of
+timestamps. A `BarBatch` contains the symbols that have a bar at that
+timestamp; missing bars are counted in total and per symbol.
+
+Validation:
+
+- symbols must be non-empty and unique;
+- each series must have at least one bar;
+- timestamps within a series must be strictly increasing (duplicates and
+  unsorted rows are rejected);
+- every OHLCV row is checked with the same validator as the single-symbol
+  loader.
+
+`BarPanel` preserves the input symbol order in each batch. The long-format CSV
+loader groups rows by symbol, so the series order is lexicographic.
+
+`Backtester::run_batch` validates that batches are non-empty, timestamps are
+strictly increasing, symbols within a batch are unique, and the requested
+`trade_symbol` is present in every batch. Orders execute against the trade
+symbol's OHLC; the batch strategy can inspect all other symbols for signals.
+
+`SingleSymbolBatchStrategy` adapts a single-symbol `Strategy` to one symbol in
+the batch, which lets the existing strategy API run unchanged over a panel.
+
+Multi-asset position accounting, per-symbol portfolios and target weights are
+the next milestone. Until then, `run_batch` is a data/context API over the
+single-instrument execution engine.
 
 ## Position accounting
 
@@ -244,6 +275,8 @@ which makes every fill and cash movement predictable. They verify:
 - volume participation, shared bar liquidity, partial fills and zero-volume
   bars;
 - fixed, spread and impact slippage models;
+- multi-symbol union alignment, missing counts, long-format loading, batch
+  execution and the single-symbol adapter;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against

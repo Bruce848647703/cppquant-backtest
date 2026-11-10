@@ -27,8 +27,16 @@ The per-bar liquidity calculation adds a multiply, a minimum and a subtraction
 per order. A dedicated partial-fill throughput baseline will be added with the
 multi-symbol work.
 
+## W3: multi-symbol panels
+
+The panel layer is allocation-light and not separately benchmarked yet. The
+single-symbol hot loop is unchanged; `run_batch` adds one string lookup per
+batch for the trade symbol and passes the full batch to the strategy. A
+multi-symbol throughput baseline will be added with the portfolio accounting
+work.
+
 ## Planned baselines
 
-- W3–W4: multi-symbol batch throughput and portfolio update cost.
+- W4: multi-symbol batch throughput and portfolio update cost.
 - W5–W6: walk-forward and parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.

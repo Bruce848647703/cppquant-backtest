@@ -26,7 +26,10 @@ No third-party dependencies.
   not stack duplicate fills.
 - **Metrics**: total and annualized return, annualized volatility, Sharpe
   ratio, maximum drawdown, turnover, win rate, commission paid.
-- **CSV loader** (`timestamp,open,high,low,close,volume`) with validation.
+- **Single-symbol CSV loader** (`timestamp,open,high,low,close,volume`) with
+  validation.
+- **Multi-symbol panels**: union-aligned `BarBatch` data, missing-bar counts,
+  a batch strategy API and a long-format CSV loader.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
   buy-and-hold.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
@@ -130,6 +133,41 @@ A gap through the stop activates the limit immediately.
 `OrderStatus` is one of `Pending`, `PartiallyFilled`, `Filled`, `Cancelled` or
 `Expired`. W1 fills orders in full; partial fills arrive with the volume
 participation work in W2.
+
+## Multi-symbol panels
+
+`BarPanel` aligns per-symbol series on the union of timestamps. Each `BarBatch`
+contains the symbols that have a bar at that timestamp; missing bars are counted
+per symbol.
+
+```cpp
+#include "cppquant/backtest.hpp"
+
+const BarPanel panel = load_bar_panel_csv("data/sample_multi.csv");
+
+class Signal : public BatchStrategy {
+ public:
+  void on_batch(const BarBatch& batch, Backtester& engine) override {
+    const Bar* a = batch.find("AAA");
+    const Bar* b = batch.find("BBB");
+    if (a && b) {
+      engine.order_target(b->close > a->close ? 10.0 : 0.0);
+    }
+  }
+};
+
+Signal strategy;
+Backtester engine;
+const Performance result =
+    engine.run_batch(panel.batches(), "AAA", strategy);
+```
+
+Orders still execute against the single `trade_symbol`; other symbols provide
+context. Multi-asset position accounting is the next milestone.
+
+```bash
+./build/panel_backtest data/sample_multi.csv 10
+```
 
 ## Command-line backtest
 
@@ -235,9 +273,11 @@ config.impact_bps = 20.0;
 ```text
 include/cppquant/backtest.hpp   public API
 src/backtest.cpp                engine, accounting, metrics, strategies
-src/csv.cpp                     CSV loader
+src/csv.cpp                     single and long-format CSV loaders
+src/panel.cpp                   multi-symbol alignment and batch loop
 src/validate.hpp                shared OHLC validation
-examples/backtest_cli.cpp       CLI
+examples/backtest_cli.cpp       single-symbol CLI
+examples/panel_backtest.cpp     multi-symbol CLI
 ```
 
 At each bar the engine:
@@ -256,7 +296,8 @@ and test strategy.
 
 ## Limitations
 
-- Single instrument and single strategy per run.
+- Single tradable instrument per run; batch strategies can read other symbols
+  but orders execute against one `trade_symbol`.
 - Bar data only: no ticks, order book, queue position or latency model.
 - No margin, borrow fees, corporate actions or transaction taxes.
 - No walk-forward optimization or parameter sweeps; run the CLI per parameter
@@ -268,13 +309,15 @@ with participation limits, and a walk-forward experiment driver.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 42 tests cover:
+The repository uses a small header-only test harness. The 51 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
 - DAY expiry, GTC persistence, cancellation and order-state queries;
 - volume participation, shared bar liquidity, partial fills across bars and
   zero-volume bars;
+- multi-symbol union alignment, missing-bar counts, long-format CSV loading,
+  batch execution and the single-symbol adapter;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;

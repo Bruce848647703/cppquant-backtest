@@ -36,6 +36,7 @@ endif()
 add_library(cppquant_backtest
     src/backtest.cpp
     src/csv.cpp
+    src/panel.cpp
 )
 add_library(cppquant::backtest ALIAS cppquant_backtest)
 target_include_directories(cppquant_backtest PUBLIC
@@ -52,6 +53,12 @@ if(CPPQUANT_BUILD_EXAMPLES)
     )
     target_link_libraries(backtest_cli PRIVATE cppquant::backtest)
     cppquant_set_warnings(backtest_cli)
+
+    add_executable(panel_backtest
+        examples/panel_backtest.cpp
+    )
+    target_link_libraries(panel_backtest PRIVATE cppquant::backtest)
+    cppquant_set_warnings(panel_backtest)
 endif()
 
 if(CPPQUANT_BUILD_BENCHMARKS)
@@ -68,6 +75,7 @@ if(CPPQUANT_BUILD_TESTS)
     add_executable(backtest_tests
         tests/main.cpp
         tests/test_backtest.cpp
+        tests/test_panel.cpp
     )
     target_link_libraries(backtest_tests PRIVATE cppquant::backtest)
     target_include_directories(backtest_tests PRIVATE tests)
@@ -82,6 +90,11 @@ if(CPPQUANT_BUILD_TESTS)
                     --fast 5 --slow 20 --quantity 100
         )
         set_tests_properties(backtest_cli_sample PROPERTIES TIMEOUT 60)
+
+        add_test(NAME panel_backtest_sample
+            COMMAND panel_backtest ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_multi.csv 10
+        )
+        set_tests_properties(panel_backtest_sample PROPERTIES TIMEOUT 60)
     endif()
 
     if(TARGET backtest_bench)
