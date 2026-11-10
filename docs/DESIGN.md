@@ -341,6 +341,7 @@ which makes every fill and cash movement predictable. They verify:
   and worker exception propagation;
 - split invariance, pending-order rescaling, dividend cash flows, margin and
   borrow accrual and corporate-action CSV validation;
+- momentum, mean-reversion and equal-weight rebalance example runs;
 - long, short, partial close and flip accounting;
 - target orders, duplicate suppression and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover against
@@ -356,9 +357,8 @@ TSan job runs the parallel sweep and walk-forward tests. The benchmark runs in
 
 ## Possible extensions
 
-- A portfolio of instruments with per-symbol positions and marks.
 - Queue position, latency and tick-level fills.
-- Discrete dividends, splits and borrow costs.
 - Cross-process or GPU sweeps for very large grids.
+- More corporate-action types and configurable day-count conventions.
 - An equity-curve export (CSV/JSON) for plotting.
 - A reference vector implementation for property-based tests of accounting.

@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-11
 
 ### Added
 
@@ -54,6 +54,9 @@ All notable changes to this project are documented here.
   `--margin-rate` and `--borrow-rate` flags.
 - Corporate-action tests for equity invariance, dividends, financing and
   malformed events, plus `docs/CORPORATE_ACTIONS.md`.
+- `strategy_demo` with momentum, mean-reversion and equal-weight rebalance
+  examples, CTest smoke runs and `docs/EXAMPLES.md`.
+- CMake package version moved to 0.5.0.
 
 ### Planned
 

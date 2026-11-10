@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(cppquant_backtest VERSION 0.1.0 LANGUAGES CXX)
+project(cppquant_backtest VERSION 0.5.0 LANGUAGES CXX)
 
 option(CPPQUANT_BUILD_TESTS "Build the unit tests" ON)
 option(CPPQUANT_BUILD_BENCHMARKS "Build the benchmark" ON)
@@ -83,6 +83,12 @@ if(CPPQUANT_BUILD_EXAMPLES)
     )
     target_link_libraries(walk_forward_cli PRIVATE cppquant::backtest)
     cppquant_set_warnings(walk_forward_cli)
+
+    add_executable(strategy_demo
+        examples/strategy_demo.cpp
+    )
+    target_link_libraries(strategy_demo PRIVATE cppquant::backtest)
+    cppquant_set_warnings(strategy_demo)
 endif()
 
 if(CPPQUANT_BUILD_BENCHMARKS)
@@ -137,6 +143,18 @@ if(CPPQUANT_BUILD_TESTS)
                     --export ${CMAKE_CURRENT_BINARY_DIR}/walk_forward_sample.csv
         )
         set_tests_properties(walk_forward_cli_sample PROPERTIES TIMEOUT 120)
+
+        add_test(NAME strategy_demo_momentum
+            COMMAND strategy_demo --bars ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_bars.csv
+                    --strategy momentum --lookback 5
+        )
+        set_tests_properties(strategy_demo_momentum PROPERTIES TIMEOUT 60)
+
+        add_test(NAME strategy_demo_rebalance
+            COMMAND strategy_demo --panel ${CMAKE_CURRENT_SOURCE_DIR}/data/sample_multi.csv
+                    --strategy rebalance --rebalance-every 2
+        )
+        set_tests_properties(strategy_demo_rebalance PROPERTIES TIMEOUT 60)
     endif()
 
     if(TARGET backtest_bench)

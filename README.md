@@ -41,7 +41,8 @@ No third-party dependencies.
 - **Financing costs**: actual/365 margin on negative cash and borrow costs on
   short positions, with per-run totals.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
-  buy-and-hold.
+  buy-and-hold, plus momentum, mean-reversion and equal-weight rebalance
+  examples.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
 
 ## Quick start
@@ -261,6 +262,19 @@ dividends credit long positions and debit shorts. See
 [docs/CORPORATE_ACTIONS.md](docs/CORPORATE_ACTIONS.md) for the event format,
 timing and day-count rules.
 
+### Example strategies
+
+```bash
+./build/strategy_demo --bars data/sample_bars.csv \
+  --strategy momentum --lookback 20
+./build/strategy_demo --bars data/sample_bars.csv \
+  --strategy mean-reversion --lookback 20 --zscore 1.0
+./build/strategy_demo --panel data/sample_multi.csv \
+  --strategy rebalance --rebalance-every 2
+```
+
+See [docs/EXAMPLES.md](docs/EXAMPLES.md) for the signal rules.
+
 ## Command-line backtest
 
 ```bash
@@ -376,6 +390,7 @@ src/validate.hpp                shared OHLC validation
 examples/backtest_cli.cpp       single-symbol CLI
 examples/panel_backtest.cpp     multi-symbol CLI
 examples/walk_forward_cli.cpp   walk-forward CLI
+examples/strategy_demo.cpp      momentum, mean-reversion and rebalance demos
 ```
 
 At each bar the engine:
@@ -431,7 +446,8 @@ The repository uses a small header-only test harness. The 79 tests cover:
 - equity curve, total return, drawdown, volatility, Sharpe and turnover;
 - SMA crossover trading and short mode;
 - CSV parsing, header handling and malformed input;
-- invalid configuration, invalid orders and reset between runs.
+- invalid configuration, invalid orders and reset between runs;
+- momentum, mean-reversion and equal-weight rebalance example runs.
 
 ```bash
 ./build/backtest_tests            # all tests
