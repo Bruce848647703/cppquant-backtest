@@ -35,8 +35,15 @@ batch for the trade symbol and passes the full batch to the strategy. A
 multi-symbol throughput baseline will be added with the portfolio accounting
 work.
 
+## W4: multi-asset accounting
+
+No separate throughput benchmark yet. The existing 1M-bar single-symbol
+benchmark is unchanged; multi-asset batches add one hash lookup per pending
+order and a per-symbol mark update per batch. A portfolio benchmark will be
+added with the walk-forward/parallel sweep work.
+
 ## Planned baselines
 
-- W4: multi-symbol batch throughput and portfolio update cost.
+- W5–W6: walk-forward and parallel sweep wall time versus serial.
 - W5–W6: walk-forward and parallel sweep wall time versus serial.
 - W7: corporate-action and financing-cost overhead.

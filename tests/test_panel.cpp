@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -26,6 +27,21 @@ Bar bar(std::int64_t timestamp, double open, double close,
 std::filesystem::path temporary_path(const std::string& name) {
   return std::filesystem::temp_directory_path() / name;
 }
+
+class ScriptedBatchStrategy : public BatchStrategy {
+public:
+  using Action = std::function<void(const BarBatch&, Backtester&, std::size_t)>;
+
+  explicit ScriptedBatchStrategy(Action action) : action_(std::move(action)) {}
+
+  void on_batch(const BarBatch& batch, Backtester& engine) override {
+    action_(batch, engine, index_++);
+  }
+
+private:
+  Action action_;
+  std::size_t index_{};
+};
 
 class CrossAssetStrategy : public BatchStrategy {
 public:
@@ -98,6 +114,199 @@ TEST(panel_rejects_invalid_series) {
 
   CHECK_THROW(BarPanel({SymbolSeries{"AAA", {bar(0, -100, 100)}}}),
               std::invalid_argument);
+}
+
+TEST(multi_asset_positions_share_cash) {
+  const std::vector<Bar> first = {
+      bar(0, 100, 100),
+      bar(86'400, 110, 110),
+      bar(172'800, 120, 120),
+  };
+  const std::vector<Bar> second = {
+      bar(0, 50, 50),
+      bar(86'400, 60, 60),
+      bar(172'800, 70, 70),
+  };
+  const BarPanel panel(
+      {SymbolSeries{"AAA", first}, SymbolSeries{"BBB", second}});
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 1.0;
+  Backtester engine(config);
+
+  ScriptedBatchStrategy strategy(
+      [](const BarBatch&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy("AAA", 10.0);
+          backtester.buy("BBB", 5.0);
+        } else if (index == 1) {
+          backtester.sell("AAA", 10.0);
+        }
+      });
+
+  const Performance result = engine.run_batch(panel.batches(), "AAA", strategy);
+
+  CHECK_EQ(engine.fills().size(), 3u);
+  CHECK_EQ(engine.fills()[0].symbol, std::string("AAA"));
+  CHECK_EQ(engine.fills()[1].symbol, std::string("BBB"));
+  CHECK_EQ(engine.fills()[2].symbol, std::string("AAA"));
+  CHECK_NEAR(engine.position("AAA"), 0.0, 1e-12);
+  CHECK_NEAR(engine.position("BBB"), 5.0, 1e-12);
+  CHECK_NEAR(engine.cash(), 9'800.0, 1e-12);
+  CHECK_NEAR(engine.realized_pnl("AAA"), 100.0, 1e-12);
+  CHECK_NEAR(engine.realized_pnl("BBB"), 0.0, 1e-12);
+  CHECK_NEAR(engine.portfolio_equity(), 10'150.0, 1e-12);
+  CHECK_NEAR(result.final_equity, 10'150.0, 1e-12);
+  CHECK_NEAR(result.final_position, 0.0, 1e-12);
+  CHECK_EQ(result.final_positions.size(), 1u);
+  CHECK_NEAR(result.final_positions.at("BBB"), 5.0, 1e-12);
+}
+
+TEST(multi_asset_target_weights_rebalance) {
+  const std::vector<Bar> first = {
+      bar(0, 100, 100),
+      bar(86'400, 100, 100),
+  };
+  const std::vector<Bar> second = {
+      bar(0, 50, 50),
+      bar(86'400, 50, 50),
+  };
+  const BarPanel panel(
+      {SymbolSeries{"AAA", first}, SymbolSeries{"BBB", second}});
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 1.0;
+  Backtester engine(config);
+
+  ScriptedBatchStrategy strategy(
+      [](const BarBatch&, Backtester& backtester, std::size_t index) {
+        if (index != 0) {
+          return;
+        }
+        const double equity = backtester.portfolio_equity();
+        backtester.order_target("AAA", 0.5 * equity / 100.0);
+        backtester.order_target("BBB", 0.5 * equity / 50.0);
+        backtester.order_target("AAA", 0.5 * equity / 100.0);
+      });
+
+  const Performance result = engine.run_batch(panel.batches(), "AAA", strategy);
+
+  CHECK_EQ(engine.fills().size(), 2u);
+  CHECK_NEAR(engine.position("AAA"), 50.0, 1e-12);
+  CHECK_NEAR(engine.position("BBB"), 100.0, 1e-12);
+  CHECK_NEAR(engine.cash(), 0.0, 1e-12);
+  CHECK_NEAR(engine.portfolio_equity(), 10'000.0, 1e-12);
+  CHECK_NEAR(result.final_positions.at("AAA"), 50.0, 1e-12);
+  CHECK_NEAR(result.final_positions.at("BBB"), 100.0, 1e-12);
+}
+
+TEST(multi_asset_equity_uses_last_mark_for_missing_symbol) {
+  const std::vector<Bar> first = {
+      bar(0, 100, 100),
+      bar(86'400, 100, 100),
+      bar(172'800, 100, 100),
+  };
+  const std::vector<Bar> second = {
+      bar(0, 50, 50),
+      bar(86'400, 50, 60),
+  };
+  const BarPanel panel(
+      {SymbolSeries{"AAA", first}, SymbolSeries{"BBB", second}});
+
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 1.0;
+  Backtester engine(config);
+
+  ScriptedBatchStrategy strategy(
+      [](const BarBatch&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy("BBB", 5.0);
+        }
+      });
+
+  engine.run_batch(panel.batches(), "AAA", strategy);
+
+  CHECK_EQ(panel.batches().size(), 3u);
+  CHECK_EQ(panel.missing_bars("BBB"), 1u);
+  CHECK_NEAR(engine.position("BBB"), 5.0, 1e-12);
+  CHECK_NEAR(engine.cash(), 9'750.0, 1e-12);
+  CHECK_NEAR(engine.portfolio_equity(), 10'050.0, 1e-12);
+}
+
+TEST(symbol_order_target_does_not_stack_pending_orders) {
+  const std::vector<Bar> first = {
+      bar(0, 100, 100),
+      bar(86'400, 100, 100),
+  };
+  const std::vector<Bar> second = {
+      bar(0, 50, 50),
+      bar(86'400, 50, 50),
+  };
+  const BarPanel panel(
+      {SymbolSeries{"AAA", first}, SymbolSeries{"BBB", second}});
+  Backtester engine;
+
+  ScriptedBatchStrategy strategy(
+      [](const BarBatch&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.order_target("AAA", 10.0);
+          backtester.order_target("AAA", 10.0);
+          backtester.order_target("BBB", 5.0);
+          backtester.order_target("BBB", 5.0);
+        }
+      });
+
+  engine.run_batch(panel.batches(), "AAA", strategy);
+
+  CHECK_EQ(engine.fills().size(), 2u);
+  CHECK_NEAR(engine.position("AAA"), 10.0, 1e-12);
+  CHECK_NEAR(engine.position("BBB"), 5.0, 1e-12);
+}
+
+TEST(close_position_targets_one_symbol) {
+  const std::vector<Bar> first = {
+      bar(0, 100, 100),
+      bar(86'400, 100, 100),
+      bar(172'800, 110, 110),
+  };
+  const std::vector<Bar> second = {
+      bar(0, 50, 50),
+      bar(86'400, 50, 50),
+      bar(172'800, 60, 60),
+  };
+  const BarPanel panel(
+      {SymbolSeries{"AAA", first}, SymbolSeries{"BBB", second}});
+  BacktestConfig config;
+  config.initial_cash = 10'000.0;
+  config.commission_bps = 0.0;
+  config.slippage_bps = 0.0;
+  config.max_volume_participation = 1.0;
+  Backtester engine(config);
+
+  ScriptedBatchStrategy strategy(
+      [](const BarBatch&, Backtester& backtester, std::size_t index) {
+        if (index == 0) {
+          backtester.buy("AAA", 10.0);
+          backtester.buy("BBB", 5.0);
+        } else if (index == 1) {
+          backtester.close_position("AAA");
+        }
+      });
+
+  engine.run_batch(panel.batches(), "AAA", strategy);
+
+  CHECK_NEAR(engine.position("AAA"), 0.0, 1e-12);
+  CHECK_NEAR(engine.position("BBB"), 5.0, 1e-12);
+  CHECK_NEAR(engine.realized_pnl("AAA"), 100.0, 1e-12);
 }
 
 TEST(loader_reads_a_long_format_panel) {

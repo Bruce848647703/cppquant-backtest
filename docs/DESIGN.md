@@ -148,14 +148,26 @@ symbol's OHLC; the batch strategy can inspect all other symbols for signals.
 `SingleSymbolBatchStrategy` adapts a single-symbol `Strategy` to one symbol in
 the batch, which lets the existing strategy API run unchanged over a panel.
 
-Multi-asset position accounting, per-symbol portfolios and target weights are
-the next milestone. Until then, `run_batch` is a data/context API over the
-single-instrument execution engine.
+### Multi-asset accounting
+
+Each symbol has its own position, average cost, realized PnL and winning/losing
+close counts. Cash and commission are shared at the portfolio level.
+
+```text
+portfolio_equity = cash + sum(position[symbol] * mark[symbol])
+```
+
+Marks are updated from each batch's closes. If a held symbol is absent from a
+batch, its last mark is retained; if no mark exists yet, average cost is used.
+The no-symbol order overloads use `trade_symbol` as the default, while
+`buy("AAA", qty)` and `order_target("BBB", qty)` target a specific symbol.
+
+`Performance::final_positions` reports every non-zero final position.
 
 ## Position accounting
 
-The engine uses average cost for the open position and realizes PnL when a fill
-reduces or closes it.
+The engine uses average cost for each symbol's open position and realizes PnL
+when a fill reduces or closes it.
 
 Let `q` be the signed fill quantity, `p` the fill price, `P` the current
 position and `A` its average cost.

@@ -30,6 +30,8 @@ No third-party dependencies.
   validation.
 - **Multi-symbol panels**: union-aligned `BarBatch` data, missing-bar counts,
   a batch strategy API and a long-format CSV loader.
+- **Multi-asset portfolio**: per-symbol positions, average cost, realized PnL,
+  shared cash, target quantities and portfolio equity.
 - **Built-in strategies**: SMA crossover (long-only or long/short) and
   buy-and-hold.
 - Tests, CLI, benchmark, CMake package export and multi-compiler CI.
@@ -162,8 +164,22 @@ const Performance result =
     engine.run_batch(panel.batches(), "AAA", strategy);
 ```
 
-Orders still execute against the single `trade_symbol`; other symbols provide
-context. Multi-asset position accounting is the next milestone.
+Orders can target any symbol in the batch, for example
+`engine.buy("AAA", 10.0)` or `engine.order_target("BBB", 5.0)`. Cash is shared
+across the portfolio, while position, average cost and realized PnL are tracked
+per symbol. The overloads without a symbol use `trade_symbol` as the default.
+
+`engine.portfolio_equity()` marks every position at its last known close and
+falls back to average cost when a symbol has no mark yet. Target weights can be
+implemented by sizing each `order_target` from portfolio equity and the current
+price.
+
+```text
+cppquant-backtest panel
+symbols: 2, batches: 4, missing bars: 1
+final equity: 100059.59
+trades: 2
+```
 
 ```bash
 ./build/panel_backtest data/sample_multi.csv 10
@@ -296,16 +312,15 @@ and test strategy.
 
 ## Limitations
 
-- Single tradable instrument per run; batch strategies can read other symbols
-  but orders execute against one `trade_symbol`.
 - Bar data only: no ticks, order book, queue position or latency model.
+- No short-borrow costs, margin calls or per-symbol risk limits yet.
 - No margin, borrow fees, corporate actions or transaction taxes.
 - No walk-forward optimization or parameter sweeps; run the CLI per parameter
   set or drive `Backtester` from your own code.
 - Metrics assume bars are evenly spaced and match `periods_per_year`.
 
-Natural extensions are a multi-asset portfolio, limit/stop orders, a fill model
-with participation limits, and a walk-forward experiment driver.
+Natural extensions are walk-forward evaluation, a multi-asset risk model and a
+fill model with queue position and latency.
 
 ## Tests
 
@@ -318,6 +333,8 @@ The repository uses a small header-only test harness. The 51 tests cover:
   zero-volume bars;
 - multi-symbol union alignment, missing-bar counts, long-format CSV loading,
   batch execution and the single-symbol adapter;
+- multi-asset positions, shared cash, per-symbol realized PnL, target weights,
+  last-mark equity and per-symbol close;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;

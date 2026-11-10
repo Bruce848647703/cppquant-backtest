@@ -27,6 +27,12 @@ All notable changes to this project are documented here.
 - Long-format multi-symbol CSV loader, sample data and `panel_backtest` CLI.
 - Tests for alignment, invalid series, loading, batch execution and the
   single-symbol adapter.
+- Per-symbol positions, average cost, realized PnL and winning/losing closes
+  with shared portfolio cash.
+- Symbol-aware order entry and `order_target`, plus `portfolio_equity()` with
+  last-mark fallback to average cost.
+- Multi-asset tests for shared cash, target weights, missing marks and
+  per-symbol close.
 
 ### Planned
 

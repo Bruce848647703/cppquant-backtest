@@ -43,15 +43,13 @@ Backtester::Backtester(BacktestConfig config) : config_(config) {
 
 void Backtester::reset() {
   cash_ = config_.initial_cash;
-  position_ = 0.0;
-  average_cost_ = 0.0;
-  realized_pnl_ = 0.0;
   total_commission_ = 0.0;
   total_notional_ = 0.0;
   next_order_id_ = 1;
-  winning_closes_ = 0;
-  losing_closes_ = 0;
   current_bar_ = -1;
+  default_symbol_.clear();
+  positions_.clear();
+  marks_.clear();
   orders_.clear();
   pending_.clear();
   fills_.clear();
@@ -59,9 +57,9 @@ void Backtester::reset() {
   equity_timestamps_.clear();
 }
 
-OrderId Backtester::submit_order(OrderType type, Side side, double quantity,
-                                 double limit_price, double stop_price,
-                                 TimeInForce tif) {
+OrderId Backtester::submit_order(const std::string& symbol, OrderType type,
+                                 Side side, double quantity, double limit_price,
+                                 double stop_price, TimeInForce tif) {
   if (!std::isfinite(quantity) || quantity <= 0.0) {
     throw std::invalid_argument("order quantity must be positive and finite");
   }
@@ -89,6 +87,7 @@ OrderId Backtester::submit_order(OrderType type, Side side, double quantity,
   order.submitted_bar = current_bar_;
   order.expires_after_bar = tif == TimeInForce::Day ? current_bar_ + 1 : -1;
   order.status = OrderStatus::Pending;
+  order.symbol = symbol;
 
   const OrderId id = order.id;
   orders_.emplace(id, order);
@@ -97,47 +96,93 @@ OrderId Backtester::submit_order(OrderType type, Side side, double quantity,
 }
 
 OrderId Backtester::buy(double quantity, TimeInForce tif) {
-  return submit_order(OrderType::Market, Side::Buy, quantity, 0.0, 0.0, tif);
+  return buy(default_symbol_, quantity, tif);
+}
+
+OrderId Backtester::buy(const std::string& symbol, double quantity,
+                        TimeInForce tif) {
+  return submit_order(symbol, OrderType::Market, Side::Buy, quantity, 0.0, 0.0,
+                      tif);
 }
 
 OrderId Backtester::sell(double quantity, TimeInForce tif) {
-  return submit_order(OrderType::Market, Side::Sell, quantity, 0.0, 0.0, tif);
+  return sell(default_symbol_, quantity, tif);
+}
+
+OrderId Backtester::sell(const std::string& symbol, double quantity,
+                         TimeInForce tif) {
+  return submit_order(symbol, OrderType::Market, Side::Sell, quantity, 0.0, 0.0,
+                      tif);
 }
 
 OrderId Backtester::buy_limit(double quantity, double limit_price,
                               TimeInForce tif) {
-  return submit_order(OrderType::Limit, Side::Buy, quantity, limit_price, 0.0,
-                      tif);
+  return buy_limit(default_symbol_, quantity, limit_price, tif);
+}
+
+OrderId Backtester::buy_limit(const std::string& symbol, double quantity,
+                              double limit_price, TimeInForce tif) {
+  return submit_order(symbol, OrderType::Limit, Side::Buy, quantity,
+                      limit_price, 0.0, tif);
 }
 
 OrderId Backtester::sell_limit(double quantity, double limit_price,
                                TimeInForce tif) {
-  return submit_order(OrderType::Limit, Side::Sell, quantity, limit_price, 0.0,
-                      tif);
+  return sell_limit(default_symbol_, quantity, limit_price, tif);
+}
+
+OrderId Backtester::sell_limit(const std::string& symbol, double quantity,
+                               double limit_price, TimeInForce tif) {
+  return submit_order(symbol, OrderType::Limit, Side::Sell, quantity,
+                      limit_price, 0.0, tif);
 }
 
 OrderId Backtester::buy_stop(double quantity, double stop_price,
                              TimeInForce tif) {
-  return submit_order(OrderType::Stop, Side::Buy, quantity, 0.0, stop_price,
-                      tif);
+  return buy_stop(default_symbol_, quantity, stop_price, tif);
+}
+
+OrderId Backtester::buy_stop(const std::string& symbol, double quantity,
+                             double stop_price, TimeInForce tif) {
+  return submit_order(symbol, OrderType::Stop, Side::Buy, quantity, 0.0,
+                      stop_price, tif);
 }
 
 OrderId Backtester::sell_stop(double quantity, double stop_price,
                               TimeInForce tif) {
-  return submit_order(OrderType::Stop, Side::Sell, quantity, 0.0, stop_price,
-                      tif);
+  return sell_stop(default_symbol_, quantity, stop_price, tif);
+}
+
+OrderId Backtester::sell_stop(const std::string& symbol, double quantity,
+                              double stop_price, TimeInForce tif) {
+  return submit_order(symbol, OrderType::Stop, Side::Sell, quantity, 0.0,
+                      stop_price, tif);
 }
 
 OrderId Backtester::buy_stop_limit(double quantity, double stop_price,
                                    double limit_price, TimeInForce tif) {
-  return submit_order(OrderType::StopLimit, Side::Buy, quantity, limit_price,
-                      stop_price, tif);
+  return buy_stop_limit(default_symbol_, quantity, stop_price, limit_price,
+                        tif);
+}
+
+OrderId Backtester::buy_stop_limit(const std::string& symbol, double quantity,
+                                   double stop_price, double limit_price,
+                                   TimeInForce tif) {
+  return submit_order(symbol, OrderType::StopLimit, Side::Buy, quantity,
+                      limit_price, stop_price, tif);
 }
 
 OrderId Backtester::sell_stop_limit(double quantity, double stop_price,
                                     double limit_price, TimeInForce tif) {
-  return submit_order(OrderType::StopLimit, Side::Sell, quantity, limit_price,
-                      stop_price, tif);
+  return sell_stop_limit(default_symbol_, quantity, stop_price, limit_price,
+                         tif);
+}
+
+OrderId Backtester::sell_stop_limit(const std::string& symbol, double quantity,
+                                    double stop_price, double limit_price,
+                                    TimeInForce tif) {
+  return submit_order(symbol, OrderType::StopLimit, Side::Sell, quantity,
+                      limit_price, stop_price, tif);
 }
 
 bool Backtester::cancel_order(OrderId id) {
@@ -173,6 +218,11 @@ std::vector<OrderState> Backtester::open_orders() const {
 }
 
 void Backtester::order_target(double target_position) {
+  order_target(default_symbol_, target_position);
+}
+
+void Backtester::order_target(const std::string& symbol,
+                              double target_position) {
   if (!std::isfinite(target_position)) {
     throw std::invalid_argument("target position must be finite");
   }
@@ -184,20 +234,53 @@ void Backtester::order_target(double target_position) {
       continue;
     }
     const OrderState& order = iterator->second;
+    if (order.symbol != symbol) {
+      continue;
+    }
     const double remaining = order.quantity - order.filled_quantity;
     pending_quantity += order.side == Side::Buy ? remaining : -remaining;
   }
 
-  const double delta = target_position - (position_ + pending_quantity);
+  const double delta = target_position - (position(symbol) + pending_quantity);
   if (delta > 1e-12) {
-    buy(delta);
+    buy(symbol, delta);
   } else if (delta < -1e-12) {
-    sell(-delta);
+    sell(symbol, -delta);
   }
 }
 
 void Backtester::close_position() {
-  order_target(0.0);
+  order_target(default_symbol_, 0.0);
+}
+
+void Backtester::close_position(const std::string& symbol) {
+  order_target(symbol, 0.0);
+}
+
+double Backtester::position(const std::string& symbol) const noexcept {
+  const auto iterator = positions_.find(symbol);
+  return iterator == positions_.end() ? 0.0 : iterator->second.quantity;
+}
+
+double Backtester::average_cost(const std::string& symbol) const noexcept {
+  const auto iterator = positions_.find(symbol);
+  return iterator == positions_.end() ? 0.0 : iterator->second.average_cost;
+}
+
+double Backtester::realized_pnl(const std::string& symbol) const noexcept {
+  const auto iterator = positions_.find(symbol);
+  return iterator == positions_.end() ? 0.0 : iterator->second.realized_pnl;
+}
+
+double Backtester::portfolio_equity() const noexcept {
+  double equity = cash_;
+  for (const auto& [symbol, position] : positions_) {
+    const auto mark = marks_.find(symbol);
+    const double price =
+        mark == marks_.end() ? position.average_cost : mark->second;
+    equity += position.quantity * price;
+  }
+  return equity;
 }
 
 bool Backtester::try_fill(OrderState& order, const Bar& bar, double& price,
@@ -301,36 +384,38 @@ void Backtester::apply_fill(OrderState& order, double price,
   total_commission_ += commission;
   total_notional_ += notional;
 
-  const double new_position = position_ + signed_quantity;
+  Position& position = position_for(order.symbol);
+  const double new_position = position.quantity + signed_quantity;
 
-  if (std::abs(position_) < 1e-12) {
-    average_cost_ = price;
-  } else if ((position_ > 0.0) == (signed_quantity > 0.0)) {
-    average_cost_ =
-        (average_cost_ * position_ + price * signed_quantity) / new_position;
+  if (std::abs(position.quantity) < 1e-12) {
+    position.average_cost = price;
+  } else if ((position.quantity > 0.0) == (signed_quantity > 0.0)) {
+    position.average_cost =
+        (position.average_cost * position.quantity + price * signed_quantity) /
+        new_position;
   } else {
     const double closing =
-        std::min(std::abs(position_), std::abs(signed_quantity));
-    const double direction = position_ > 0.0 ? 1.0 : -1.0;
-    const double pnl = (price - average_cost_) * closing * direction;
-    realized_pnl_ += pnl;
+        std::min(std::abs(position.quantity), std::abs(signed_quantity));
+    const double direction = position.quantity > 0.0 ? 1.0 : -1.0;
+    const double pnl = (price - position.average_cost) * closing * direction;
+    position.realized_pnl += pnl;
     if (pnl > 0.0) {
-      ++winning_closes_;
+      ++position.winning_closes;
     } else if (pnl < 0.0) {
-      ++losing_closes_;
+      ++position.losing_closes;
     }
 
     if (std::abs(new_position) < 1e-12) {
-      average_cost_ = 0.0;
-    } else if ((new_position > 0.0) != (position_ > 0.0)) {
-      average_cost_ = price;
+      position.average_cost = 0.0;
+    } else if ((new_position > 0.0) != (position.quantity > 0.0)) {
+      position.average_cost = price;
     }
   }
 
-  position_ = new_position;
-  if (std::abs(position_) < 1e-12) {
-    position_ = 0.0;
-    average_cost_ = 0.0;
+  position.quantity = new_position;
+  if (std::abs(position.quantity) < 1e-12) {
+    position.quantity = 0.0;
+    position.average_cost = 0.0;
   }
 
   const double previous_notional =
@@ -344,8 +429,8 @@ void Backtester::apply_fill(OrderState& order, double price,
     order.status = OrderStatus::PartiallyFilled;
   }
 
-  fills_.push_back(
-      Fill{order.id, timestamp, order.side, price, quantity, commission});
+  fills_.push_back(Fill{order.id, timestamp, order.side, price, quantity,
+                        commission, order.symbol});
 }
 
 void Backtester::remove_pending(OrderId id) {
@@ -369,12 +454,18 @@ double Backtester::effective_slippage_bps(const Bar& bar,
   return config_.slippage_bps;
 }
 
-void Backtester::execute_pending(const Bar& bar) {
+void Backtester::execute_pending(
+    const std::unordered_map<std::string, const Bar*>& bars) {
   std::vector<OrderId> still_pending;
   still_pending.reserve(pending_.size());
 
-  double bar_liquidity =
-      bar.volume > 0.0 ? bar.volume * config_.max_volume_participation : 0.0;
+  std::unordered_map<std::string, double> liquidity;
+  liquidity.reserve(bars.size());
+  for (const auto& [symbol, bar] : bars) {
+    liquidity[symbol] = bar->volume > 0.0
+                            ? bar->volume * config_.max_volume_participation
+                            : 0.0;
+  }
 
   for (const OrderId id : pending_) {
     auto iterator = orders_.find(id);
@@ -386,6 +477,13 @@ void Backtester::execute_pending(const Bar& bar) {
         order.status != OrderStatus::PartiallyFilled) {
       continue;
     }
+
+    const auto bar_iterator = bars.find(order.symbol);
+    if (bar_iterator == bars.end()) {
+      still_pending.push_back(id);
+      continue;
+    }
+    const Bar& bar = *bar_iterator->second;
 
     double price = 0.0;
     bool triggered_now = false;
@@ -400,8 +498,9 @@ void Backtester::execute_pending(const Bar& bar) {
       order.triggered = true;
     }
 
+    double& available = liquidity[order.symbol];
     const double remaining = order.quantity - order.filled_quantity;
-    const double quantity = std::min(remaining, bar_liquidity);
+    const double quantity = std::min(remaining, available);
     if (quantity <= 1e-12) {
       still_pending.push_back(id);
       continue;
@@ -417,7 +516,7 @@ void Backtester::execute_pending(const Bar& bar) {
     }
 
     apply_fill(order, price, bar.timestamp, quantity);
-    bar_liquidity -= quantity;
+    available -= quantity;
     if (order.status == OrderStatus::Pending ||
         order.status == OrderStatus::PartiallyFilled) {
       still_pending.push_back(id);
@@ -450,22 +549,24 @@ Performance Backtester::run(const std::vector<Bar>& bars, Strategy& strategy) {
   }
 
   reset();
+  default_symbol_.clear();
 
   for (std::size_t index = 0; index < bars.size(); ++index) {
     current_bar_ = static_cast<std::int64_t>(index);
     if (index > 0) {
-      execute_pending(bars[index]);
+      const std::unordered_map<std::string, const Bar*> batch_bars{
+          {default_symbol_, &bars[index]}};
+      execute_pending(batch_bars);
     }
     strategy.on_bar(bars[index], *this);
     expire_day_orders();
-    equity_curve_.push_back(equity(bars[index].close));
+    marks_[default_symbol_] = bars[index].close;
+    equity_curve_.push_back(portfolio_equity());
     equity_timestamps_.push_back(bars[index].timestamp);
   }
 
   return summarize(bars.size());
 }
-
-
 
 Performance Backtester::summarize(std::size_t bar_count) const {
   Performance performance;
@@ -476,11 +577,16 @@ Performance Backtester::summarize(std::size_t bar_count) const {
   performance.total_return =
       performance.final_equity / performance.initial_equity - 1.0;
   performance.trades = fills_.size();
-  performance.winning_trades = winning_closes_;
-  performance.losing_trades = losing_closes_;
+  performance.final_position = position();
+  for (const auto& [symbol, position] : positions_) {
+    performance.realized_pnl += position.realized_pnl;
+    performance.winning_trades += position.winning_closes;
+    performance.losing_trades += position.losing_closes;
+    if (std::abs(position.quantity) > 1e-12) {
+      performance.final_positions[symbol] = position.quantity;
+    }
+  }
   performance.total_commission = total_commission_;
-  performance.realized_pnl = realized_pnl_;
-  performance.final_position = position_;
 
   const std::size_t closed_trades =
       performance.winning_trades + performance.losing_trades;

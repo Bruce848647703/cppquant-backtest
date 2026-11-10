@@ -133,6 +133,7 @@ struct OrderState {
   bool triggered{false};
   std::int64_t submitted_bar{-1};
   std::int64_t expires_after_bar{-1};
+  std::string symbol;
 };
 
 struct Fill {
@@ -142,6 +143,7 @@ struct Fill {
   double price{};
   double quantity{};
   double commission{};
+  std::string symbol;
 };
 
 struct BacktestConfig {
@@ -182,6 +184,7 @@ struct Performance {
   std::size_t trades{};
   std::size_t winning_trades{};
   std::size_t losing_trades{};
+  std::unordered_map<std::string, double> final_positions;
 };
 
 class Backtester;
@@ -239,25 +242,48 @@ public:
                         const std::string& trade_symbol,
                         BatchStrategy& strategy);
 
-  /// Market order entry, callable from Strategy::on_bar.
+  /// Market order entry, callable from Strategy::on_bar. The overload
+  /// without a symbol uses the default symbol of the current run.
   OrderId buy(double quantity, TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId buy(const std::string& symbol, double quantity,
+              TimeInForce tif = TimeInForce::GoodTilCancelled);
   OrderId sell(double quantity,
+               TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell(const std::string& symbol, double quantity,
                TimeInForce tif = TimeInForce::GoodTilCancelled);
 
   OrderId buy_limit(double quantity, double limit_price,
                     TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId buy_limit(const std::string& symbol, double quantity,
+                    double limit_price,
+                    TimeInForce tif = TimeInForce::GoodTilCancelled);
   OrderId sell_limit(double quantity, double limit_price,
+                     TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_limit(const std::string& symbol, double quantity,
+                     double limit_price,
                      TimeInForce tif = TimeInForce::GoodTilCancelled);
 
   OrderId buy_stop(double quantity, double stop_price,
                    TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId buy_stop(const std::string& symbol, double quantity,
+                   double stop_price,
+                   TimeInForce tif = TimeInForce::GoodTilCancelled);
   OrderId sell_stop(double quantity, double stop_price,
+                    TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_stop(const std::string& symbol, double quantity,
+                    double stop_price,
                     TimeInForce tif = TimeInForce::GoodTilCancelled);
 
   OrderId buy_stop_limit(double quantity, double stop_price, double limit_price,
                          TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId buy_stop_limit(const std::string& symbol, double quantity,
+                         double stop_price, double limit_price,
+                         TimeInForce tif = TimeInForce::GoodTilCancelled);
   OrderId sell_stop_limit(double quantity, double stop_price,
                           double limit_price,
+                          TimeInForce tif = TimeInForce::GoodTilCancelled);
+  OrderId sell_stop_limit(const std::string& symbol, double quantity,
+                          double stop_price, double limit_price,
                           TimeInForce tif = TimeInForce::GoodTilCancelled);
 
   /// Cancel a pending order. Returns false for unknown or terminal orders.
@@ -270,26 +296,36 @@ public:
   /// Copy of all orders that are still pending or partially filled.
   std::vector<OrderState> open_orders() const;
 
-  /// Move to `target_position` (positive long, negative short) using the
-  /// current position plus pending orders as the starting point.
+  /// Move the default symbol to `target_position` (positive long, negative
+  /// short), accounting for pending orders.
   void order_target(double target_position);
+  /// Move one symbol to `target_position`, accounting for pending orders in
+  /// that symbol.
+  void order_target(const std::string& symbol, double target_position);
   void close_position();
+  void close_position(const std::string& symbol);
 
   double position() const noexcept {
-    return position_;
+    return position(default_symbol_);
   }
+  double position(const std::string& symbol) const noexcept;
   double cash() const noexcept {
     return cash_;
   }
   double average_cost() const noexcept {
-    return average_cost_;
+    return average_cost(default_symbol_);
   }
+  double average_cost(const std::string& symbol) const noexcept;
   double realized_pnl() const noexcept {
-    return realized_pnl_;
+    return realized_pnl(default_symbol_);
   }
+  double realized_pnl(const std::string& symbol) const noexcept;
   double equity(double mark_price) const noexcept {
-    return cash_ + position_ * mark_price;
+    return cash_ + position(default_symbol_) * mark_price;
   }
+  /// Cash plus every position marked at its last known close. Positions
+  /// without a mark fall back to average cost.
+  double portfolio_equity() const noexcept;
 
   bool has_pending_orders() const noexcept {
     return !pending_.empty();
@@ -312,9 +348,21 @@ public:
   }
 
 private:
-  OrderId submit_order(OrderType type, Side side, double quantity,
-                       double limit_price, double stop_price, TimeInForce tif);
-  void execute_pending(const Bar& bar);
+  struct Position {
+    double quantity{};
+    double average_cost{};
+    double realized_pnl{};
+    std::size_t winning_closes{};
+    std::size_t losing_closes{};
+  };
+
+  OrderId submit_order(const std::string& symbol, OrderType type, Side side,
+                       double quantity, double limit_price, double stop_price,
+                       TimeInForce tif);
+  void execute_pending(const std::unordered_map<std::string, const Bar*>& bars);
+  Position& position_for(const std::string& symbol) {
+    return positions_[symbol];
+  }
   bool try_fill(OrderState& order, const Bar& bar, double& price,
                 bool& triggered_now) const;
   void apply_fill(OrderState& order, double price, std::int64_t timestamp,
@@ -327,16 +375,14 @@ private:
 
   BacktestConfig config_;
   double cash_{};
-  double position_{};
-  double average_cost_{};
-  double realized_pnl_{};
   double total_commission_{};
   double total_notional_{};
   OrderId next_order_id_{1};
-  std::size_t winning_closes_{};
-  std::size_t losing_closes_{};
   std::int64_t current_bar_{-1};
+  std::string default_symbol_;
 
+  std::unordered_map<std::string, Position> positions_;
+  std::unordered_map<std::string, double> marks_;
   std::unordered_map<OrderId, OrderState> orders_;
   std::vector<OrderId> pending_;
   std::vector<Fill> fills_;

@@ -78,6 +78,15 @@ int main(int argc, char** argv) {
     std::printf("total return: %.2f%%\n", result.total_return * 100.0);
     std::printf("trades: %zu, final position: %.4f\n", result.trades,
                 result.final_position);
+    std::printf("final positions:");
+    if (result.final_positions.empty()) {
+      std::printf(" (flat)");
+    } else {
+      for (const auto& [symbol, position] : result.final_positions) {
+        std::printf(" %s=%.4f", symbol.c_str(), position);
+      }
+    }
+    std::printf("\n");
   } catch (const std::exception& error) {
     std::fprintf(stderr, "error: %s\n", error.what());
     return 1;

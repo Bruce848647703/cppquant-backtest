@@ -117,16 +117,25 @@ Performance Backtester::run_batch(const std::vector<BarBatch>& batches,
   }
 
   reset();
+  default_symbol_ = trade_symbol;
 
   for (std::size_t index = 0; index < batches.size(); ++index) {
     current_bar_ = static_cast<std::int64_t>(index);
-    const Bar* trade_bar = batches[index].find(trade_symbol);
+    std::unordered_map<std::string, const Bar*> batch_bars;
+    batch_bars.reserve(batches[index].bars.size());
+    for (const auto& entry : batches[index].bars) {
+      batch_bars[entry.symbol] = &entry.bar;
+    }
+
     if (index > 0) {
-      execute_pending(*trade_bar);
+      execute_pending(batch_bars);
     }
     strategy.on_batch(batches[index], *this);
     expire_day_orders();
-    equity_curve_.push_back(equity(trade_bar->close));
+    for (const auto& entry : batches[index].bars) {
+      marks_[entry.symbol] = entry.bar.close;
+    }
+    equity_curve_.push_back(portfolio_equity());
     equity_timestamps_.push_back(batches[index].timestamp);
   }
 
