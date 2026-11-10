@@ -247,7 +247,7 @@ Reference numbers from an Apple M-series laptop (Apple clang 21, `-O3`):
 
 | Workload | Bars | Time | Throughput | Fills |
 | --- | ---: | ---: | ---: | ---: |
-| SMA(10,30) backtest | 1,000,000 | 32 ms | 30.8 M bars/s | 38,221 |
+| SMA(10,30) backtest | 1,000,000 | 49 ms | 20.3 M bars/s | 38,221 |
 
 The engine is arithmetic-light per bar; the number mostly measures the strategy
 callback and portfolio bookkeeping. Generation of the synthetic data is

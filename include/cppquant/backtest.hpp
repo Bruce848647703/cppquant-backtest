@@ -359,6 +359,7 @@ private:
   OrderId submit_order(const std::string& symbol, OrderType type, Side side,
                        double quantity, double limit_price, double stop_price,
                        TimeInForce tif);
+  void execute_pending(const Bar& bar);
   void execute_pending(const std::unordered_map<std::string, const Bar*>& bars);
   Position& position_for(const std::string& symbol) {
     return positions_[symbol];

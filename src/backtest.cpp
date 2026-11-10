@@ -454,6 +454,67 @@ double Backtester::effective_slippage_bps(const Bar& bar,
   return config_.slippage_bps;
 }
 
+void Backtester::execute_pending(const Bar& bar) {
+  std::vector<OrderId> still_pending;
+  still_pending.reserve(pending_.size());
+  double available =
+      bar.volume > 0.0 ? bar.volume * config_.max_volume_participation : 0.0;
+
+  for (const OrderId id : pending_) {
+    auto iterator = orders_.find(id);
+    if (iterator == orders_.end()) {
+      continue;
+    }
+    OrderState& order = iterator->second;
+    if (order.status != OrderStatus::Pending &&
+        order.status != OrderStatus::PartiallyFilled) {
+      continue;
+    }
+    if (order.symbol != default_symbol_) {
+      still_pending.push_back(id);
+      continue;
+    }
+
+    double price = 0.0;
+    bool triggered_now = false;
+    if (!try_fill(order, bar, price, triggered_now)) {
+      if (triggered_now) {
+        order.triggered = true;
+      }
+      still_pending.push_back(id);
+      continue;
+    }
+    if (triggered_now) {
+      order.triggered = true;
+    }
+
+    const double remaining = order.quantity - order.filled_quantity;
+    const double quantity = std::min(remaining, available);
+    if (quantity <= 1e-12) {
+      still_pending.push_back(id);
+      continue;
+    }
+
+    if (order.type == OrderType::Market || order.type == OrderType::Stop) {
+      const double slippage = effective_slippage_bps(bar, quantity) / 10'000.0;
+      price = order.side == Side::Buy ? price * (1.0 + slippage)
+                                      : price * (1.0 - slippage);
+      if (!std::isfinite(price) || price <= 0.0) {
+        throw std::runtime_error("execution price is invalid");
+      }
+    }
+
+    apply_fill(order, price, bar.timestamp, quantity);
+    available -= quantity;
+    if (order.status == OrderStatus::Pending ||
+        order.status == OrderStatus::PartiallyFilled) {
+      still_pending.push_back(id);
+    }
+  }
+
+  pending_ = std::move(still_pending);
+}
+
 void Backtester::execute_pending(
     const std::unordered_map<std::string, const Bar*>& bars) {
   std::vector<OrderId> still_pending;
@@ -554,14 +615,12 @@ Performance Backtester::run(const std::vector<Bar>& bars, Strategy& strategy) {
   for (std::size_t index = 0; index < bars.size(); ++index) {
     current_bar_ = static_cast<std::int64_t>(index);
     if (index > 0) {
-      const std::unordered_map<std::string, const Bar*> batch_bars{
-          {default_symbol_, &bars[index]}};
-      execute_pending(batch_bars);
+      execute_pending(bars[index]);
     }
     strategy.on_bar(bars[index], *this);
     expire_day_orders();
     marks_[default_symbol_] = bars[index].close;
-    equity_curve_.push_back(portfolio_equity());
+    equity_curve_.push_back(equity(bars[index].close));
     equity_timestamps_.push_back(bars[index].timestamp);
   }
 

@@ -5,7 +5,7 @@ Reference environment: Apple M-series (arm64), Apple clang 21.0.0,
 
 | Workload | Bars | Time | Throughput | Fills |
 | --- | ---: | ---: | ---: | ---: |
-| SMA(10,30) backtest | 1,000,000 | 0.032 s | 30.8 M bars/s | 38,221 |
+| SMA(10,30) backtest | 1,000,000 | 0.049 s | 20.3 M bars/s | 38,221 |
 
 Command:
 
@@ -37,9 +37,11 @@ work.
 
 ## W4: multi-asset accounting
 
-No separate throughput benchmark yet. The existing 1M-bar single-symbol
-benchmark is unchanged; multi-asset batches add one hash lookup per pending
-order and a per-symbol mark update per batch. A portfolio benchmark will be
+The 1M-bar single-symbol benchmark moved from about 32 ms to 49 ms (20.3M
+bars/s) after the multi-asset refactor. Per-symbol position and mark lookups
+replace direct scalar fields; the result is still comfortably above 20M
+bars/s. Multi-asset batches add one hash lookup per pending order and a
+per-symbol mark update per batch. A dedicated portfolio benchmark will be
 added with the walk-forward/parallel sweep work.
 
 ## Planned baselines
