@@ -4,9 +4,10 @@
 
 `cppquant-backtest` is a deliberately small event-driven backtester for bar
 data. It prioritizes deterministic accounting and a clear execution model over
-feature breadth: no order book, no multi-asset portfolio yet, no parameter
-optimization. W3 adds multi-symbol input and batch strategies while keeping
-execution against one trade symbol; W4 adds multi-asset accounting.
+feature breadth: no order book, no tick-level queue model. It supports
+multi-symbol panels, multi-asset accounting, walk-forward selection, parallel
+SMA sweeps, corporate actions and financing costs, while order execution stays
+against one trade symbol per run.
 
 ## Event loop
 
@@ -14,6 +15,8 @@ execution against one trade symbol; W4 adds multi-asset accounting.
 reset state
 for i in 0 .. bars.size()-1:
     current_bar = i
+    accrue financing from the previous bar's marks
+    apply corporate actions effective at bars[i].timestamp
     if i > 0:
         execute pending orders against bars[i] OHLC
     strategy.on_bar(bars[i], engine)
@@ -37,9 +40,9 @@ Pending -> PartiallyFilled -> Filled
    +-> Expired
 ```
 
-W1 fills in full; W2 adds volume participation and partial fills.
-`find_order`, `open_orders` and `cancel_order` expose the state machine to
-strategies and tests.
+Orders may fill in full or in part, subject to the bar's shared volume
+budget. `find_order`, `open_orders` and `cancel_order` expose the state machine
+to strategies and tests.
 
 ### Bar liquidity and partial fills
 
