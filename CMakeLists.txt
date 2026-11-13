@@ -106,6 +106,7 @@ if(CPPQUANT_BUILD_TESTS)
         tests/main.cpp
         tests/test_backtest.cpp
         tests/test_panel.cpp
+        tests/test_csv_errors.cpp
         tests/test_corporate_actions.cpp
         tests/test_sweep.cpp
         tests/test_walk_forward.cpp

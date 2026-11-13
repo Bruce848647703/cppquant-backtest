@@ -57,6 +57,8 @@ All notable changes to this project are documented here.
 - `strategy_demo` with momentum, mean-reversion and equal-weight rebalance
   examples, CTest smoke runs and `docs/EXAMPLES.md`.
 - CMake package version moved to 0.5.0.
+- CSV error-path tests for wrong column counts, invalid/out-of-range numbers,
+  empty symbols and empty files.
 
 ### Planned
 

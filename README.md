@@ -423,7 +423,7 @@ position and latency, and a broader corporate-action event set.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 79 tests cover:
+The repository uses a small header-only test harness. The 83 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
@@ -445,7 +445,8 @@ The repository uses a small header-only test harness. The 79 tests cover:
 - target orders, closing and end-of-data pending orders;
 - equity curve, total return, drawdown, volatility, Sharpe and turnover;
 - SMA crossover trading and short mode;
-- CSV parsing, header handling and malformed input;
+- CSV parsing, header handling, malformed rows, invalid numbers, out-of-range
+  values, empty symbols and empty files;
 - invalid configuration, invalid orders and reset between runs;
 - momentum, mean-reversion and equal-weight rebalance example runs.
 
