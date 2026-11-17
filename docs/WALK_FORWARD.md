@@ -70,7 +70,7 @@ config.test_bars = 63;
 config.quantity = 100.0;
 config.threads = 4;   // 0 = hardware concurrency, 1 = serial
 
-const auto result = run_walk_forward(bars, grid, config);
+const auto result = run_walk_forward(bars, grid, config, actions);
 for (const auto& window : result.windows) {
   // window.parameters, window.training, window.testing
 }
@@ -110,6 +110,8 @@ Indices are half-open bar offsets into the input series.
   best-parameter selection on a trend.
 - Parallel and serial runs are compared window by window; the worker count must
   not change any result.
+- Corporate actions are filtered to each training and test bar range, so an
+  event outside a window never applies to its first bar.
 
 ## Limitations
 

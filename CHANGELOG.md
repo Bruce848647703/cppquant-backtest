@@ -59,6 +59,9 @@ All notable changes to this project are documented here.
 - CMake package version moved to 0.5.0.
 - CSV error-path tests for wrong column counts, invalid/out-of-range numbers,
   empty symbols and empty files.
+- Corporate-action support in SMA sweeps and walk-forward test windows, scoped
+  to each bar range; tests for dividends, ignored out-of-range events and OOS
+  cost propagation.
 
 ### Planned
 

@@ -241,7 +241,8 @@ const auto results = run_sma_sweep(bars, grid, config);
 
 Results stay in grid order regardless of worker completion order. Set
 `WalkForwardConfig::threads` to parallelize each training sweep; cash still
-compounds sequentially across windows. See [docs/SWEEP.md](docs/SWEEP.md).
+compounds sequentially across windows. Both sweeps and walk-forward accept
+corporate actions, scoped to each bar window. See [docs/SWEEP.md](docs/SWEEP.md).
 
 ### Corporate actions and financing
 
@@ -423,7 +424,7 @@ position and latency, and a broader corporate-action event set.
 
 ## Tests
 
-The repository uses a small header-only test harness. The 83 tests cover:
+The repository uses a small header-only test harness. The 85 tests cover:
 
 - next-open execution, commission and slippage arithmetic;
 - market, limit, stop and stop-limit fills, gaps and intrabar touch rules;
@@ -440,6 +441,7 @@ The repository uses a small header-only test harness. The 83 tests cover:
   worker resolution, worker exceptions and parallel walk-forward results;
 - split equity invariance, pending-order adjustment, long/short dividends,
   margin and borrow accrual, batch symbol matching and action CSV validation;
+- corporate-action scoping in sweeps and walk-forward test windows;
 - fixed, spread and impact slippage models;
 - long, short, partial close and position-flip accounting;
 - target orders, closing and end-of-data pending orders;

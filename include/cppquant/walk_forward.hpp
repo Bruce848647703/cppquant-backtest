@@ -57,9 +57,11 @@ struct WalkForwardResult {
 /// and applies it only to the following `[test_start, test_end)` bars. Test
 /// windows are non-overlapping when `step_bars >= test_bars`. Cash compounds
 /// across windows; positions do not carry over.
-WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
-                                   const std::vector<SmaParameters>& grid,
-                                   const WalkForwardConfig& config = {});
+WalkForwardResult
+run_walk_forward(const std::vector<Bar>& bars,
+                 const std::vector<SmaParameters>& grid,
+                 const WalkForwardConfig& config = {},
+                 const std::vector<CorporateAction>& actions = {});
 
 /// Write one row per window plus a header. Throws std::runtime_error when the
 /// file cannot be opened.

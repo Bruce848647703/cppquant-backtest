@@ -161,3 +161,77 @@ TEST(walk_forward_parallel_matches_serial) {
   CHECK_NEAR(serial.final_equity, parallel.final_equity, 1e-12);
   CHECK_NEAR(serial.sharpe_ratio, parallel.sharpe_ratio, 1e-12);
 }
+namespace {
+
+std::vector<Bar> rising_bars(std::size_t count) {
+  std::vector<Bar> bars;
+  bars.reserve(count);
+  for (std::size_t index = 0; index < count; ++index) {
+    const double price = 100.0 + 0.5 * static_cast<double>(index);
+    bars.push_back(bar(index, price));
+  }
+  return bars;
+}
+
+} // namespace
+
+TEST(sma_sweep_scopes_actions_to_the_bar_range) {
+  const auto bars = rising_bars(100);
+  const auto grid = make_sma_grid({2}, {10});
+
+  SmaSweepConfig config;
+  zero_cost(config.backtest);
+  config.quantity = 10.0;
+  config.threads = 1;
+
+  const auto without = run_sma_sweep(bars, grid, config);
+  config.actions.push_back(CorporateAction{
+      bars[50].timestamp, "", CorporateActionType::CashDividend, 1.0});
+  const auto with = run_sma_sweep(bars, grid, config);
+
+  CHECK_EQ(without.size(), 1u);
+  CHECK_EQ(with.size(), 1u);
+  CHECK_NEAR(with[0].performance.final_position, 10.0, 1e-12);
+  CHECK_NEAR(with[0].performance.total_dividends, 10.0, 1e-12);
+  CHECK_NEAR(with[0].performance.final_equity,
+             without[0].performance.final_equity + 10.0, 1e-9);
+
+  config.actions.clear();
+  config.actions.push_back(CorporateAction{bars.front().timestamp - 86'400, "",
+                                           CorporateActionType::CashDividend,
+                                           5.0});
+  const auto before = run_sma_sweep(bars, grid, config);
+  CHECK_NEAR(before[0].performance.final_equity,
+             without[0].performance.final_equity, 1e-9);
+
+  config.actions.clear();
+  config.actions.push_back(CorporateAction{bars.back().timestamp + 86'400, "",
+                                           CorporateActionType::CashDividend,
+                                           5.0});
+  const auto after = run_sma_sweep(bars, grid, config);
+  CHECK_NEAR(after[0].performance.final_equity,
+             without[0].performance.final_equity, 1e-9);
+}
+
+TEST(walk_forward_applies_actions_to_test_windows) {
+  const auto bars = rising_bars(100);
+  const auto grid = make_sma_grid({2}, {10});
+
+  WalkForwardConfig config;
+  zero_cost(config.backtest);
+  config.train_bars = 20;
+  config.test_bars = 20;
+  config.quantity = 10.0;
+  config.threads = 1;
+
+  const auto without = run_walk_forward(bars, grid, config);
+  const CorporateAction dividend{bars.back().timestamp, "",
+                                 CorporateActionType::CashDividend, 1.0};
+  const auto with = run_walk_forward(bars, grid, config, {dividend});
+
+  CHECK_EQ(without.windows.size(), with.windows.size());
+  CHECK(!with.windows.empty());
+  CHECK_NEAR(with.windows.back().testing.final_position, 10.0, 1e-12);
+  CHECK_NEAR(with.windows.back().testing.total_dividends, 10.0, 1e-12);
+  CHECK_NEAR(with.final_equity, without.final_equity + 10.0, 1e-8);
+}

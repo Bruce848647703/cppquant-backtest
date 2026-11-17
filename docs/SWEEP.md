@@ -14,6 +14,7 @@ SmaSweepConfig config;
 config.backtest.initial_cash = 100'000.0;
 config.quantity = 100.0;
 config.threads = 4;              // 0 = hardware concurrency, 1 = serial
+config.actions = load_corporate_actions_csv("actions.csv");
 
 const auto results = run_sma_sweep(bars, grid, config);
 for (const auto& entry : results) {
@@ -69,6 +70,8 @@ machine has other work.
   equity curves and aggregate statistics.
 - Invalid bars, grids, quantities and backtest settings are rejected, including
   exceptions raised inside a worker.
+- Corporate actions are applied only at or after the first bar and at or before
+  the last bar; out-of-range events are ignored.
 - TSan runs the parallel sweep tests in CI.
 
 ## Limitations

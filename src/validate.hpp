@@ -65,4 +65,21 @@ prepare_corporate_actions(const std::vector<CorporateAction>& actions) {
   return prepared;
 }
 
+inline std::vector<CorporateAction>
+corporate_actions_for_bars(const std::vector<CorporateAction>& actions,
+                           const std::vector<Bar>& bars) {
+  if (actions.empty() || bars.empty()) {
+    return {};
+  }
+  const std::int64_t first = bars.front().timestamp;
+  const std::int64_t last = bars.back().timestamp;
+  std::vector<CorporateAction> selected;
+  for (const auto& action : actions) {
+    if (action.timestamp >= first && action.timestamp <= last) {
+      selected.push_back(action);
+    }
+  }
+  return selected;
+}
+
 } // namespace cppquant::detail

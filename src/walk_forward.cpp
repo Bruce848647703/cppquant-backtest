@@ -89,9 +89,11 @@ void compute_aggregate(WalkForwardResult& result,
 
 } // namespace
 
-WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
-                                   const std::vector<SmaParameters>& grid,
-                                   const WalkForwardConfig& config) {
+WalkForwardResult
+run_walk_forward(const std::vector<Bar>& bars,
+                 const std::vector<SmaParameters>& grid,
+                 const WalkForwardConfig& config,
+                 const std::vector<CorporateAction>& actions) {
   if (bars.empty()) {
     throw std::invalid_argument("walk-forward requires at least one bar");
   }
@@ -121,6 +123,7 @@ WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
     }
   }
 
+  const auto prepared_actions = detail::prepare_corporate_actions(actions);
   WalkForwardResult result;
   double equity = config.backtest.initial_cash;
   std::size_t start = 0;
@@ -147,6 +150,7 @@ WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
     sweep_config.backtest.initial_cash = equity;
     sweep_config.quantity = config.quantity;
     sweep_config.threads = config.threads;
+    sweep_config.actions = prepared_actions;
     const auto sweep = run_sma_sweep(train_bars, grid, sweep_config);
 
     SmaParameters best = sweep.front().parameters;
@@ -168,7 +172,9 @@ WalkForwardResult run_walk_forward(const std::vector<Bar>& bars,
     Backtester tester(backtest_config);
     SmaCrossoverStrategy selected(best.fast_window, best.slow_window,
                                   config.quantity);
-    const Performance testing = tester.run(test_bars, selected);
+    const auto test_actions =
+        detail::corporate_actions_for_bars(prepared_actions, test_bars);
+    const Performance testing = tester.run(test_bars, selected, test_actions);
 
     result.equity_curve.insert(result.equity_curve.end(),
                                tester.equity_curve().begin(),

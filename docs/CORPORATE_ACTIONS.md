@@ -26,6 +26,10 @@ the action timestamp, before pending orders execute. A single-symbol run
 ignores the symbol field. A batch run requires a non-empty symbol that appears
 in the input.
 
+`SmaSweepConfig::actions` and the optional actions argument to
+`run_walk_forward` filter events to each bar range, so a corporate action from
+outside a training or test window cannot apply to its first bar.
+
 ## Splits
 
 For a ratio `r`:

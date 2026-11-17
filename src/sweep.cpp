@@ -83,6 +83,11 @@ run_sma_sweep(const std::vector<Bar>& bars,
     throw std::invalid_argument("sweep quantity must be positive and finite");
   }
 
+  const auto prepared_actions =
+      detail::prepare_corporate_actions(config.actions);
+  const auto actions =
+      detail::corporate_actions_for_bars(prepared_actions, bars);
+
   std::vector<SmaSweepResult> results(grid.size());
   std::atomic<std::size_t> next{0};
   std::atomic<bool> failed{false};
@@ -101,7 +106,7 @@ run_sma_sweep(const std::vector<Bar>& bars,
                                       grid[index].slow_window, config.quantity);
         SmaSweepResult result;
         result.parameters = grid[index];
-        result.performance = engine.run(bars, strategy);
+        result.performance = engine.run(bars, strategy, actions);
         results[index] = std::move(result);
       } catch (...) {
         std::lock_guard<std::mutex> lock(error_mutex);

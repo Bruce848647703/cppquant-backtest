@@ -21,6 +21,8 @@ struct SmaSweepConfig {
   double quantity{100.0};
   /// Worker count. Zero selects hardware concurrency; one runs serially.
   std::size_t threads{0};
+  /// Corporate actions applied inside the bars' timestamp range.
+  std::vector<CorporateAction> actions;
 };
 
 struct SmaSweepResult {
