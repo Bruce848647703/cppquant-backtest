@@ -74,7 +74,8 @@ const auto result = run_walk_forward(bars, grid, config, actions);
 for (const auto& window : result.windows) {
   // window.parameters, window.training, window.testing
 }
-// result.equity_curve, result.total_return, result.sharpe_ratio ...
+// result.equity_curve, result.total_return, result.sharpe_ratio,
+// result.total_dividends, result.total_margin_cost, result.total_borrow_cost
 ```
 
 ## CLI
@@ -94,7 +95,8 @@ The CLI prints one row per window and the aggregate OOS statistics.
 
 ```text
 window,train_start,train_end,test_start,test_end,fast,slow,
-train_return,train_sharpe,test_return,test_sharpe,test_trades
+train_return,train_sharpe,test_return,test_sharpe,test_trades,
+test_dividends,test_margin_cost,test_borrow_cost
 ```
 
 Indices are half-open bar offsets into the input series.

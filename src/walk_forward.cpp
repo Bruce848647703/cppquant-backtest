@@ -183,6 +183,9 @@ run_walk_forward(const std::vector<Bar>& bars,
                              tester.equity_timestamps().begin(),
                              tester.equity_timestamps().end());
     result.trades += testing.trades;
+    result.total_dividends += testing.total_dividends;
+    result.total_margin_cost += testing.total_margin_cost;
+    result.total_borrow_cost += testing.total_borrow_cost;
     equity = tester.equity_curve().back();
 
     WalkForwardWindow window;
@@ -210,7 +213,8 @@ void write_walk_forward_csv(const WalkForwardResult& result,
   }
 
   out << "window,train_start,train_end,test_start,test_end,fast,slow,"
-         "train_return,train_sharpe,test_return,test_sharpe,test_trades\n";
+         "train_return,train_sharpe,test_return,test_sharpe,test_trades,"
+         "test_dividends,test_margin_cost,test_borrow_cost\n";
   out << std::setprecision(12);
   for (std::size_t index = 0; index < result.windows.size(); ++index) {
     const auto& window = result.windows[index];
@@ -220,7 +224,9 @@ void write_walk_forward_csv(const WalkForwardResult& result,
         << ',' << window.training.total_return << ','
         << window.training.sharpe_ratio << ',' << window.testing.total_return
         << ',' << window.testing.sharpe_ratio << ',' << window.testing.trades
-        << '\n';
+        << ',' << window.testing.total_dividends << ','
+        << window.testing.total_margin_cost << ','
+        << window.testing.total_borrow_cost << '\n';
   }
 }
 

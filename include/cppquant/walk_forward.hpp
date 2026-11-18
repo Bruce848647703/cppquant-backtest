@@ -47,6 +47,10 @@ struct WalkForwardResult {
   double annualized_volatility{};
   double sharpe_ratio{};
   double max_drawdown{};
+  /// Out-of-sample corporate-action and financing totals, summed over windows.
+  double total_dividends{};
+  double total_margin_cost{};
+  double total_borrow_cost{};
   std::size_t trades{};
   std::size_t bars{};
 };

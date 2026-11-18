@@ -234,4 +234,5 @@ TEST(walk_forward_applies_actions_to_test_windows) {
   CHECK_NEAR(with.windows.back().testing.final_position, 10.0, 1e-12);
   CHECK_NEAR(with.windows.back().testing.total_dividends, 10.0, 1e-12);
   CHECK_NEAR(with.final_equity, without.final_equity + 10.0, 1e-8);
+  CHECK_NEAR(with.total_dividends, 10.0, 1e-12);
 }

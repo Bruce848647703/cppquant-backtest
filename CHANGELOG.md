@@ -62,6 +62,8 @@ All notable changes to this project are documented here.
 - Corporate-action support in SMA sweeps and walk-forward test windows, scoped
   to each bar range; tests for dividends, ignored out-of-range events and OOS
   cost propagation.
+- Walk-forward aggregates OOS dividends, margin cost and borrow cost, and the
+  CSV export includes the per-window cost columns.
 
 ### Planned
 

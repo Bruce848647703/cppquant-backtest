@@ -212,7 +212,8 @@ TEST(walk_forward_exports_a_csv) {
   while (std::getline(file, line)) {
     ++lines;
     if (lines == 1) {
-      header_seen = line.find("train_start") != std::string::npos;
+      header_seen = line.find("train_start") != std::string::npos &&
+                    line.find("test_borrow_cost") != std::string::npos;
     }
   }
   std::remove(path.string().c_str());
